@@ -4,14 +4,134 @@ import Combine
 import CoreML
 import Charts
 
+// MARK: - Loading Wave Animation
+struct WaveShape: Shape {
+    var phase: Double
+    var amplitude: Double = 20
+    var frequency: Double = 1.5
+
+    var animatableData: Double {
+        get { phase }
+        set { self.phase = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+
+        path.move(to: CGPoint(x: 0, y: 0))
+
+        for x in stride(from: 0, to: rect.width, by: 1) {
+            let relativeX = x / rect.width
+            let angle = (relativeX * 2 * .pi * frequency) + phase
+            let y = sin(angle) * amplitude
+            
+            path.addLine(to: CGPoint(x: x, y: y))
+        }
+
+        path.addLine(to: CGPoint(x: rect.width, y: rect.height))
+        path.addLine(to: CGPoint(x: 0, y: rect.height))
+        path.closeSubpath()
+
+        return path
+    }
+}
+
+struct LoadingWaveView: View {
+    @State private var phase = 0.0
+    @State private var progress = 0.0
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Color.black.opacity(0.9).ignoresSafeArea()
+                
+                WaveShape(phase: phase)
+                    .fill(
+                        LinearGradient(colors: [.cyan.opacity(0.8), .blue.opacity(0.8)], startPoint: .top, endPoint: .bottom)
+                    )
+                    .frame(height: geometry.size.height * 2)
+                    .offset(y: (1 - progress) * geometry.size.height)
+                
+                VStack {
+                    Spacer()
+                    Text("Fetching Weather Data...")
+                        .font(.title2.bold())
+                        .foregroundColor(.white)
+                        .padding(.bottom, 60)
+                }
+            }
+        }
+        .onAppear {
+            withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
+                phase = .pi * 2
+            }
+            
+            withAnimation(.easeInOut(duration: 4.0).delay(0.2)) {
+                progress = 1.0
+            }
+        }
+    }
+}
+
+
+// MARK: - Animated Background Views
+struct DynamicGradientBackground: View {
+    let colors: [Color]
+
+    var body: some View {
+        if #available(iOS 18.0, *) {
+            AnimatedMeshGradientBackground(colors: colors)
+        } else {
+            AnimatedGradientBackground(colors: colors)
+        }
+    }
+}
+
+@available(iOS 18.0, *)
+struct AnimatedMeshGradientBackground: View {
+    let colors: [Color]
+    @State private var animatedColors: [Color] = []
+    let gridPoints: [SIMD2<Float>] = [[0, 0], [1, 0], [0, 1], [1, 1]]
+
+    var body: some View {
+        MeshGradient(width: 2, height: 2, points: gridPoints, colors: animatedColors)
+            .ignoresSafeArea()
+            .onAppear {
+                self.animatedColors = generateMeshColors(from: colors)
+                Timer.scheduledTimer(withTimeInterval: 6, repeats: true) { _ in
+                    withAnimation(.easeInOut(duration: 5.0)) { self.animatedColors.shuffle() }
+                }
+            }
+            .onChange(of: colors) { newColors in
+                withAnimation(.easeInOut(duration: 3.0)) { self.animatedColors = generateMeshColors(from: newColors) }
+            }
+    }
+    
+    private func generateMeshColors(from input: [Color]) -> [Color] {
+        guard !input.isEmpty else { return Array(repeating: .gray, count: 4) }
+        var output: [Color] = []
+        for i in 0..<4 { output.append(input[i % input.count]) }
+        return output
+    }
+}
+
+struct AnimatedGradientBackground: View {
+    @State private var animateGradient = false
+    let colors: [Color]
+
+    var body: some View {
+        LinearGradient(colors: colors, startPoint: animateGradient ? .topLeading : .bottomLeading, endPoint: animateGradient ? .bottomTrailing : .topTrailing)
+            .ignoresSafeArea()
+            .onAppear {
+                withAnimation(.linear(duration: 8.0).repeatForever(autoreverses: true)) { animateGradient.toggle() }
+            }
+    }
+}
+
 // MARK: - Models
 struct PowerAPIResponse: Codable {
     let properties: Properties
-    
-    struct Properties: Codable {
-        let parameter: Parameter
-    }
-    
+    struct Properties: Codable { let parameter: Parameter }
     struct Parameter: Codable {
         let T2M: [String: Double]?
         let PRECTOTCORR: [String: Double]?
@@ -39,6 +159,29 @@ struct DailyWeatherData: Identifiable {
     let totalPrecipitation: Double
     let hourlyData: [HourlyWeatherData]
     let isPrediction: Bool
+}
+
+// MARK: - Address Autocompletion Manager
+class AddressCompleter: NSObject, ObservableObject, MKLocalSearchCompleterDelegate {
+    @Published var completions: [MKLocalSearchCompletion] = []
+    private var completer = MKLocalSearchCompleter()
+
+    override init() {
+        super.init()
+        completer.delegate = self
+    }
+    
+    var queryFragment: String = "" {
+        didSet { completer.queryFragment = queryFragment }
+    }
+
+    func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
+        self.completions = completer.results.filter { !$0.subtitle.isEmpty }
+    }
+
+    func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: Error) {
+        print("Completer failed with error: \(error.localizedDescription)")
+    }
 }
 
 // MARK: - Location Manager
@@ -70,222 +213,140 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
 
 // MARK: - Weather Predictor
 class WeatherPredictor {
-    // UPDATED: This function now averages historical data instead of using linear regression.
     func predictWeather(historicalData: [HistoricalDataPoint]) -> (temperature: Double, precipitation: Double)? {
         guard !historicalData.isEmpty else { return nil }
-        
         let tempSum = historicalData.reduce(0) { $0 + $1.temperature }
         let precipSum = historicalData.reduce(0) { $0 + $1.precipitation }
-        
         let count = Double(historicalData.count)
-        
         let avgTemp = tempSum / count
         let avgPrecip = precipSum / count
-        
-        // Ensure precipitation prediction is not negative.
         return (temperature: avgTemp, precipitation: max(0, avgPrecip))
     }
 }
 
 // MARK: - API Service
-// UPDATED: This class has been refactored for more efficient and reliable data fetching.
 class NASAPowerService: ObservableObject {
     @Published var dailyWeatherData: [DailyWeatherData] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
-    
     private let predictor = WeatherPredictor()
     
     func fetchWeatherForDateRange(latitude: Double, longitude: Double, startDate: Date, days: Int = 7) {
         isLoading = true
         errorMessage = nil
         dailyWeatherData = []
-        
         let group = DispatchGroup()
         var fetchedDailyData: [DailyWeatherData] = []
-        
         for dayOffset in 0..<days {
             guard let date = Calendar.current.date(byAdding: .day, value: dayOffset, to: startDate) else { continue }
-            
             group.enter()
             fetchDayData(latitude: latitude, longitude: longitude, date: date) { dailyData in
                 if let dailyData = dailyData {
-                    // Using a lock to safely append to the array from multiple threads
-                    DispatchQueue.main.async {
-                        fetchedDailyData.append(dailyData)
-                    }
+                    DispatchQueue.main.async { fetchedDailyData.append(dailyData) }
                 }
                 group.leave()
             }
         }
-        
         group.notify(queue: .main) { [weak self] in
-            self?.isLoading = false
-            self?.dailyWeatherData = fetchedDailyData.sorted { $0.date < $1.date }
-            
-            if fetchedDailyData.isEmpty {
-                self?.errorMessage = "No data available for the selected location and date range. Please try different parameters."
+            // Simulate a slightly longer loading time to let the animation play
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+                self?.isLoading = false
+                self?.dailyWeatherData = fetchedDailyData.sorted { $0.date < $1.date }
+                if fetchedDailyData.isEmpty {
+                    self?.errorMessage = "No data available for the selected location and date range. Please try different parameters."
+                }
             }
         }
     }
-    
     private func fetchDayData(latitude: Double, longitude: Double, date: Date, completion: @escaping (DailyWeatherData?) -> Void) {
-        let now = Date()
-        
-        // Use start of day for comparison to correctly handle the current day
-        if Calendar.current.startOfDay(for: date) > Calendar.current.startOfDay(for: now) {
+        if Calendar.current.startOfDay(for: date) > Calendar.current.startOfDay(for: Date()) {
             fetchHistoricalAndPredictDay(latitude: latitude, longitude: longitude, targetDate: date, completion: completion)
         } else {
             fetchActualDayData(latitude: latitude, longitude: longitude, date: date, completion: completion)
         }
     }
-    
     private func fetchActualDayData(latitude: Double, longitude: Double, date: Date, completion: @escaping (DailyWeatherData?) -> Void) {
         fetchHourlyDataForSingleDay(latitude: latitude, longitude: longitude, date: date) { response in
-            guard let decoded = response else {
-                completion(nil)
-                return
-            }
-            
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "yyyyMMdd"
+            guard let decoded = response else { completion(nil); return }
+            let dateFormatter = DateFormatter(); dateFormatter.dateFormat = "yyyyMMdd"
             let dateString = dateFormatter.string(from: date)
-            
             var hourlyData: [HourlyWeatherData] = []
-            
             for hour in 0..<24 {
                 let hourString = String(format: "%02d", hour)
                 let hourlyKey = dateString + hourString
-                
-                if let temp = decoded.properties.parameter.T2M?[hourlyKey],
-                   let precip = decoded.properties.parameter.PRECTOTCORR?[hourlyKey],
-                   temp != -999, precip != -999 {
+                if let temp = decoded.properties.parameter.T2M?[hourlyKey], let precip = decoded.properties.parameter.PRECTOTCORR?[hourlyKey], temp != -999, precip != -999 {
                     hourlyData.append(HourlyWeatherData(hour: hour, temperature: temp, precipitation: precip, isPrediction: false))
                 }
             }
-            
-            guard !hourlyData.isEmpty else {
-                completion(nil)
-                return
-            }
-            
+            guard !hourlyData.isEmpty else { completion(nil); return }
             let avgTemp = hourlyData.map { $0.temperature }.reduce(0, +) / Double(hourlyData.count)
             let totalPrecip = hourlyData.map { $0.precipitation }.reduce(0, +)
-            
-            let dailyData = DailyWeatherData(date: date, avgTemperature: avgTemp, totalPrecipitation: totalPrecip, hourlyData: hourlyData, isPrediction: false)
-            completion(dailyData)
+            completion(DailyWeatherData(date: date, avgTemperature: avgTemp, totalPrecipitation: totalPrecip, hourlyData: hourlyData, isPrediction: false))
         }
     }
-    
     private func fetchHistoricalAndPredictDay(latitude: Double, longitude: Double, targetDate: Date, completion: @escaping (DailyWeatherData?) -> Void) {
         let calendar = Calendar.current
         let targetComponents = calendar.dateComponents([.year, .month, .day], from: targetDate)
-        
         var yearsToFetch: [Int] = []
-        for i in 1...5 { // Fetch last 5 years of data for averaging
-            if let year = targetComponents.year {
-                yearsToFetch.append(year - i)
-            }
+        for i in 1...5 {
+            if let year = targetComponents.year { yearsToFetch.append(year - i) }
         }
-        
         let group = DispatchGroup()
         var historicalResponses = [Int: PowerAPIResponse]()
         let lock = NSLock()
-
         for year in yearsToFetch {
-            var historicalComponents = targetComponents
-            historicalComponents.year = year
+            var historicalComponents = targetComponents; historicalComponents.year = year
             guard let historicalDate = calendar.date(from: historicalComponents) else { continue }
-            
             group.enter()
             fetchHourlyDataForSingleDay(latitude: latitude, longitude: longitude, date: historicalDate) { response in
-                if let response = response {
-                    lock.lock()
-                    historicalResponses[year] = response
-                    lock.unlock()
-                }
+                if let response = response { lock.lock(); historicalResponses[year] = response; lock.unlock() }
                 group.leave()
             }
         }
-        
         group.notify(queue: .global()) {
             var hourlyPredictions: [HourlyWeatherData] = []
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "yyyyMMdd"
-
+            let dateFormatter = DateFormatter(); dateFormatter.dateFormat = "yyyyMMdd"
             for hour in 0..<24 {
                 var historicalDataForHour: [HistoricalDataPoint] = []
-                
                 for year in yearsToFetch {
                     guard let response = historicalResponses[year] else { continue }
-                    
-                    var historicalComponents = targetComponents
-                    historicalComponents.year = year
+                    var historicalComponents = targetComponents; historicalComponents.year = year
                     guard let historicalDate = calendar.date(from: historicalComponents) else { continue }
-                    
                     let dateString = dateFormatter.string(from: historicalDate)
                     let hourString = String(format: "%02d", hour)
                     let hourlyKey = dateString + hourString
-                    
-                    if let temp = response.properties.parameter.T2M?[hourlyKey],
-                       let precip = response.properties.parameter.PRECTOTCORR?[hourlyKey],
-                       temp != -999, precip != -999 {
+                    if let temp = response.properties.parameter.T2M?[hourlyKey], let precip = response.properties.parameter.PRECTOTCORR?[hourlyKey], temp != -999, precip != -999 {
                         historicalDataForHour.append(HistoricalDataPoint(year: year, temperature: temp, precipitation: precip))
                     }
                 }
-                
                 if let prediction = self.predictor.predictWeather(historicalData: historicalDataForHour) {
                     hourlyPredictions.append(HourlyWeatherData(hour: hour, temperature: prediction.temperature, precipitation: prediction.precipitation, isPrediction: true))
                 }
             }
-            
-            // Switch to main thread to call completion
             DispatchQueue.main.async {
-                guard !hourlyPredictions.isEmpty else {
-                    completion(nil)
-                    return
-                }
-                
+                guard !hourlyPredictions.isEmpty else { completion(nil); return }
                 hourlyPredictions.sort { $0.hour < $1.hour }
-                
                 let avgTemp = hourlyPredictions.map { $0.temperature }.reduce(0, +) / Double(hourlyPredictions.count)
                 let totalPrecip = hourlyPredictions.map { $0.precipitation }.reduce(0, +)
-                
-                let dailyData = DailyWeatherData(date: targetDate, avgTemperature: avgTemp, totalPrecipitation: totalPrecip, hourlyData: hourlyPredictions, isPrediction: true)
-                completion(dailyData)
+                completion(DailyWeatherData(date: targetDate, avgTemperature: avgTemp, totalPrecipitation: totalPrecip, hourlyData: hourlyPredictions, isPrediction: true))
             }
         }
     }
-    
-    // This new, efficient function fetches all hourly data for a single day in one API call.
     private func fetchHourlyDataForSingleDay(latitude: Double, longitude: Double, date: Date, completion: @escaping (PowerAPIResponse?) -> Void) {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyyMMdd"
+        let dateFormatter = DateFormatter(); dateFormatter.dateFormat = "yyyyMMdd"
         let dateString = dateFormatter.string(from: date)
-        
         let urlString = "https://power.larc.nasa.gov/api/temporal/hourly/point?parameters=T2M,PRECTOTCORR&community=RE&longitude=\(longitude)&latitude=\(latitude)&start=\(dateString)&end=\(dateString)&format=JSON"
-        
-        guard let url = URL(string: urlString) else {
-            completion(nil)
-            return
-        }
-        
+        guard let url = URL(string: urlString) else { completion(nil); return }
         URLSession.shared.dataTask(with: url) { data, response, error in
-            guard let data = data, error == nil else {
-                completion(nil)
-                return
-            }
-            
+            guard let data = data, error == nil else { completion(nil); return }
             do {
-                let decoded = try JSONDecoder().decode(PowerAPIResponse.self, from: data)
-                completion(decoded)
+                completion(try JSONDecoder().decode(PowerAPIResponse.self, from: data))
             } catch {
                 completion(nil)
             }
         }.resume()
     }
 }
-
 
 // MARK: - Helper Struct
 struct IdentifiableCoordinate: Identifiable {
@@ -306,49 +367,27 @@ struct ContentView: View {
         NavigationView {
             ZStack {
                 if !hasData {
-                    // Welcome screen
-                    VStack(spacing: 30) {
-                        Spacer()
-                        
-                        Image(systemName: "cloud.sun.fill")
-                            .font(.system(size: 100))
-                            .foregroundStyle(
-                                LinearGradient(colors: [.orange, .yellow], startPoint: .topLeading, endPoint: .bottomTrailing)
-                            )
-                        
-                        VStack(spacing: 12) {
-                            Text("Weather Forecaster")
-                                .font(.system(size: 36, weight: .bold))
-                            Text("Plan your events with AI-powered weather predictions")
-                                .font(.subheadline)
-                                .foregroundColor(.gray)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal)
+                    ZStack {
+                        DynamicGradientBackground(colors: [.pink, .purple, .blue])
+                        VStack(spacing: 30) {
+                            Spacer()
+                            Image(systemName: "cloud.sun.fill").font(.system(size: 100)).foregroundStyle(LinearGradient(colors: [.orange, .yellow], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            VStack(spacing: 12) {
+                                Text("Weather Forecaster").font(.system(size: 36, weight: .bold))
+                                Text("Plan your events with AI-powered weather predictions").font(.subheadline).foregroundColor(.white.opacity(0.8)).multilineTextAlignment(.center).padding(.horizontal)
+                            }.colorScheme(.dark); Spacer()
+                            Button(action: { showingPlanSheet = true }) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "calendar.badge.plus").font(.title3)
+                                    Text("Plan Event").font(.title3.bold())
+                                }
+                                .foregroundColor(.white).frame(maxWidth: .infinity).padding(.vertical, 20)
+                                .background(LinearGradient(colors: [.blue, .purple], startPoint: .leading, endPoint: .trailing))
+                                .cornerRadius(16).shadow(color: .blue.opacity(0.4), radius: 10, x: 0, y: 5)
+                            }.padding(.horizontal, 30).padding(.bottom, 50)
                         }
-                        
-                        Spacer()
-                        
-                        Button(action: { showingPlanSheet = true }) {
-                            HStack(spacing: 12) {
-                                Image(systemName: "calendar.badge.plus")
-                                    .font(.title3)
-                                Text("Plan Event")
-                                    .font(.title3.bold())
-                            }
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 20)
-                            .background(
-                                LinearGradient(colors: [.blue, .purple], startPoint: .leading, endPoint: .trailing)
-                            )
-                            .cornerRadius(16)
-                            .shadow(color: .blue.opacity(0.4), radius: 10, x: 0, y: 5)
-                        }
-                        .padding(.horizontal, 30)
-                        .padding(.bottom, 50)
                     }
                 } else {
-                    // Weather data view
                     WeatherDataView(
                         apiService: apiService,
                         selectedDayIndex: $selectedDayIndex,
@@ -361,14 +400,13 @@ struct ContentView: View {
                     )
                 }
             }
-            .navigationBarHidden(!hasData)
+            .navigationBarHidden(true)
         }
         .sheet(isPresented: $showingPlanSheet) {
             PlanEventSheet(
                 selectedLocation: $selectedLocation,
                 onComplete: { location, date in
                     selectedLocation = location
-                    // Reset indices when fetching new data
                     selectedDayIndex = 0
                     selectedHourIndex = 12
                     apiService.fetchWeatherForDateRange(latitude: location.latitude, longitude: location.longitude, startDate: date, days: 7)
@@ -388,86 +426,78 @@ struct WeatherDataView: View {
     let onPlanNewEvent: () -> Void
     
     var currentDay: DailyWeatherData? {
-        guard !apiService.dailyWeatherData.isEmpty, selectedDayIndex < apiService.dailyWeatherData.count else {
-            return nil
-        }
+        guard !apiService.dailyWeatherData.isEmpty, selectedDayIndex < apiService.dailyWeatherData.count else { return nil }
         return apiService.dailyWeatherData[selectedDayIndex]
     }
     
     var currentHour: HourlyWeatherData? {
-        guard let day = currentDay, !day.hourlyData.isEmpty, selectedHourIndex < day.hourlyData.count else {
-            return nil
-        }
+        guard let day = currentDay, !day.hourlyData.isEmpty, selectedHourIndex < day.hourlyData.count else { return nil }
         return day.hourlyData[selectedHourIndex]
     }
     
+    private var currentGradientColors: [Color] {
+        guard let hour = currentHour else { return [.blue, .purple] }
+        let tempF = (hour.temperature * 9/5) + 32
+        if hour.precipitation > 2.0 { return [Color(white: 0.4), .blue, .indigo, .gray] }
+        else if tempF > 75 && hour.precipitation < 0.5 { return [.yellow, .orange, .pink, .red] }
+        else if tempF < 40 { return [.white, .cyan.opacity(0.5), .blue.opacity(0.6), .gray] }
+        return [.blue, .purple.opacity(0.8), .cyan]
+    }
+    
     var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                if apiService.isLoading {
-                    ProgressView("Loading weather data...")
-                        .padding(40)
-                } else if let error = apiService.errorMessage {
-                    VStack(spacing: 20) {
-                        Text("Error")
-                            .font(.title.bold())
-                        Text(error)
-                            .multilineTextAlignment(.center)
-                            .foregroundColor(.secondary)
-                        Button("Plan a New Event", action: onPlanNewEvent)
-                            .buttonStyle(.borderedProminent)
-                    }
-                    .padding(40)
+        ZStack {
+            DynamicGradientBackground(colors: currentGradientColors)
+                .zIndex(0)
+            
+            if !apiService.isLoading {
+                ScrollView {
+                    VStack(spacing: 24) {
+                        if let error = apiService.errorMessage {
+                            VStack(spacing: 20) {
+                                Text("Error").font(.title.bold())
+                                Text(error).multilineTextAlignment(.center)
+                                Button("Plan a New Event", action: onPlanNewEvent).buttonStyle(.borderedProminent)
+                            }
+                            .padding(40).background(.thinMaterial).cornerRadius(20)
 
-                } else if let day = currentDay {
-                    // Current weather card
-                    CurrentWeatherCard(day: day, hour: currentHour)
-                    
-                    // Hourly slider
-                    HourlyWeatherSlider(
-                        hourlyData: day.hourlyData,
-                        selectedHourIndex: $selectedHourIndex
-                    )
-                    
-                    // Temperature chart
-                    TemperatureChartCard(hourlyData: day.hourlyData)
-                    
-                    // Precipitation chart
-                    PrecipitationChartCard(hourlyData: day.hourlyData)
-                    
-                    // Daily forecast slider
-                    DailyForecastSlider(
-                        dailyData: apiService.dailyWeatherData,
-                        selectedDayIndex: $selectedDayIndex
-                    )
-                    
-                    // Plan new event button
-                    Button(action: onPlanNewEvent) {
-                        HStack {
-                            Image(systemName: "calendar.badge.plus")
-                            Text("Plan Another Event")
-                                .font(.headline)
+                        } else if let day = currentDay {
+                            CurrentWeatherCard(day: day, hour: currentHour)
+                            HourlyWeatherSlider(hourlyData: day.hourlyData, selectedHourIndex: $selectedHourIndex)
+                            TemperatureChartCard(hourlyData: day.hourlyData)
+                            PrecipitationChartCard(hourlyData: day.hourlyData)
+                            DailyForecastSlider(dailyData: apiService.dailyWeatherData, selectedDayIndex: $selectedDayIndex)
+                            
+                            Button(action: onPlanNewEvent) {
+                                HStack {
+                                    Image(systemName: "calendar.badge.plus")
+                                    Text("Plan Another Event").font(.headline)
+                                }
+                                .foregroundColor(.white).frame(maxWidth: .infinity).padding()
+                                .background(LinearGradient(colors: [.blue, .purple], startPoint: .leading, endPoint: .trailing))
+                                .cornerRadius(12)
+                            }
+                            .padding(.horizontal).padding(.bottom, 30)
                         }
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(
-                            LinearGradient(colors: [.blue, .purple], startPoint: .leading, endPoint: .trailing)
-                        )
-                        .cornerRadius(12)
                     }
-                    .padding(.horizontal)
-                    .padding(.bottom, 30)
+                    .padding(.vertical)
                 }
+                .background(.clear)
+                .zIndex(1)
             }
-            .padding(.vertical)
+            
+            if apiService.isLoading {
+                LoadingWaveView()
+                    .transition(.opacity.animation(.easeIn(duration: 0.5)))
+                    .zIndex(10)
+            }
         }
+        .colorScheme(.dark)
         .navigationTitle("Weather Forecast")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
 
-// MARK: - Current Weather Card
+// MARK: - Cards and Sliders
 struct CurrentWeatherCard: View {
     let day: DailyWeatherData
     let hour: HourlyWeatherData?
@@ -476,237 +506,109 @@ struct CurrentWeatherCard: View {
         VStack(spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(day.date, style: .date)
-                        .font(.title2.bold())
+                    Text(day.date, style: .date).font(.title2.bold())
                     if let hour = hour {
                         Text(String(format: "%02d:00", hour.hour))
-                            .font(.subheadline)
-                            .foregroundColor(.gray)
+                            .font(.subheadline).foregroundColor(.white.opacity(0.7))
                     }
                 }
                 Spacer()
                 if day.isPrediction {
                     HStack(spacing: 4) {
-                        Image(systemName: "sparkles")
-                        Text("Predicted")
+                        Image(systemName: "sparkles"); Text("Predicted")
                     }
-                    .font(.caption.bold())
-                    .foregroundColor(.purple)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color.purple.opacity(0.1))
-                    .cornerRadius(20)
+                    .font(.caption.bold()).foregroundColor(.purple).padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(Color.purple.opacity(0.2)).cornerRadius(20)
                 }
             }
-            
             HStack(alignment: .top, spacing: 40) {
                 VStack(spacing: 8) {
-                    Image(systemName: "thermometer.medium")
-                        .font(.system(size: 40))
-                        .foregroundColor(.orange)
-                    
+                    Image(systemName: "thermometer.medium").font(.system(size: 40)).foregroundColor(.orange)
                     if let hour = hour {
-                        Text("\((hour.temperature * 9/5) + 32, specifier: "%.0f")°F")
-                            .font(.system(size: 48, weight: .bold))
-                        Text("\(hour.temperature, specifier: "%.1f")°C")
-                            .font(.subheadline)
-                            .foregroundColor(.gray)
+                        Text("\((hour.temperature * 9/5) + 32, specifier: "%.0f")°F").font(.system(size: 48, weight: .bold))
+                        Text("\(hour.temperature, specifier: "%.1f")°C").font(.subheadline).foregroundColor(.white.opacity(0.7))
                     }
                 }
-                
                 VStack(spacing: 8) {
-                    Image(systemName: "cloud.rain.fill")
-                        .font(.system(size: 40))
-                        .foregroundColor(.blue)
-                    
+                    Image(systemName: "cloud.rain.fill").font(.system(size: 40)).foregroundColor(.blue)
                     if let hour = hour {
-                        Text("\(hour.precipitation / 25.4, specifier: "%.2f")\"")
-                            .font(.system(size: 48, weight: .bold))
-                        Text("\(hour.precipitation, specifier: "%.1f") mm")
-                            .font(.subheadline)
-                            .foregroundColor(.gray)
+                        Text("\(hour.precipitation / 25.4, specifier: "%.2f")\"").font(.system(size: 48, weight: .bold))
+                        Text("\(hour.precipitation, specifier: "%.1f") mm").font(.subheadline).foregroundColor(.white.opacity(0.7))
                     }
                 }
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .padding(24)
-        .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color(.systemBackground))
-                .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 5)
-        )
-        .padding(.horizontal)
+            }.frame(maxWidth: .infinity)
+        }.padding(24).background(.thinMaterial).cornerRadius(20).padding(.horizontal)
     }
 }
-
-// MARK: - Hourly Weather Slider
 struct HourlyWeatherSlider: View {
     let hourlyData: [HourlyWeatherData]
     @Binding var selectedHourIndex: Int
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Hourly Forecast")
-                .font(.headline)
-                .padding(.horizontal)
-            
+            Text("Hourly Forecast").font(.headline).padding(.horizontal)
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
                         ForEach(Array(hourlyData.enumerated()), id: \.element.id) { index, data in
                             VStack(spacing: 8) {
-                                Text(String(format: "%02d:00", data.hour))
-                                    .font(.caption.bold())
-                                Image(systemName: data.precipitation > 1 ? "cloud.rain.fill" : "sun.max.fill")
-                                    .foregroundColor(data.precipitation > 1 ? .blue : .orange)
-                                Text("\((data.temperature * 9/5) + 32, specifier: "%.0f")°")
-                                    .font(.subheadline.bold())
+                                Text(String(format: "%02d:00", data.hour)).font(.caption.bold())
+                                Image(systemName: data.precipitation > 1 ? "cloud.rain.fill" : "sun.max.fill").foregroundColor(data.precipitation > 1 ? .blue : .orange)
+                                Text("\((data.temperature * 9/5) + 32, specifier: "%.0f")°").font(.subheadline.bold())
                             }
-                            .frame(width: 60)
-                            .padding(.vertical, 12)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(selectedHourIndex == index ? Color.blue.opacity(0.2) : Color.gray.opacity(0.1))
-                            )
+                            .frame(width: 60).padding(.vertical, 12)
+                            .background(RoundedRectangle(cornerRadius: 12).fill(selectedHourIndex == index ? Color.blue.opacity(0.4) : Color.white.opacity(0.1)))
                             .id(index)
-                            .onTapGesture {
-                                withAnimation {
-                                    selectedHourIndex = index
-                                    proxy.scrollTo(index, anchor: .center)
-                                }
-                            }
+                            .onTapGesture { withAnimation { selectedHourIndex = index; proxy.scrollTo(index, anchor: .center) } }
                         }
-                    }
-                    .padding(.horizontal)
-                }
-                .onAppear {
-                    proxy.scrollTo(selectedHourIndex, anchor: .center)
-                }
+                    }.padding(.horizontal)
+                }.onAppear { proxy.scrollTo(selectedHourIndex, anchor: .center) }
             }
         }
     }
 }
-
-// MARK: - Temperature Chart Card
 struct TemperatureChartCard: View {
     let hourlyData: [HourlyWeatherData]
-    
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Temperature Trend")
-                .font(.headline)
-                .padding([.top, .horizontal])
-            
+            Text("Temperature Trend").font(.headline).padding([.top, .horizontal])
             Chart(hourlyData) { data in
-                LineMark(
-                    x: .value("Hour", data.hour),
-                    y: .value("Temperature", (data.temperature * 9/5) + 32)
-                )
-                .foregroundStyle(
-                    LinearGradient(colors: [.orange, .red], startPoint: .leading, endPoint: .trailing)
-                )
-                .lineStyle(StrokeStyle(lineWidth: 3))
-                
-                AreaMark(
-                    x: .value("Hour", data.hour),
-                    y: .value("Temperature", (data.temperature * 9/5) + 32)
-                )
-                .foregroundStyle(
-                    LinearGradient(colors: [.orange.opacity(0.3), .red.opacity(0.1)], startPoint: .top, endPoint: .bottom)
-                )
+                LineMark(x: .value("Hour", data.hour), y: .value("Temperature", (data.temperature * 9/5) + 32)).foregroundStyle(LinearGradient(colors: [.orange, .red], startPoint: .leading, endPoint: .trailing)).lineStyle(StrokeStyle(lineWidth: 3))
+                AreaMark(x: .value("Hour", data.hour), y: .value("Temperature", (data.temperature * 9/5) + 32)).foregroundStyle(LinearGradient(colors: [.orange.opacity(0.3), .red.opacity(0.1)], startPoint: .top, endPoint: .bottom))
             }
-            .chartXAxis {
-                AxisMarks(values: .automatic(desiredCount: 8))
-            }
-            .frame(height: 200)
-            .padding()
-            .background(Color.gray.opacity(0.05))
-            .cornerRadius(16)
-            .padding(.horizontal)
+            .chartXAxis { AxisMarks(values: .automatic(desiredCount: 8)) }.frame(height: 200).padding().background(Color.gray.opacity(0.05)).cornerRadius(16).padding(.horizontal)
         }
     }
 }
-
-// MARK: - Precipitation Chart Card
 struct PrecipitationChartCard: View {
     let hourlyData: [HourlyWeatherData]
-    
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Precipitation")
-                .font(.headline)
-                .padding([.top, .horizontal])
-            
+            Text("Precipitation").font(.headline).padding([.top, .horizontal])
             Chart(hourlyData) { data in
-                BarMark(
-                    x: .value("Hour", data.hour),
-                    y: .value("Precipitation", data.precipitation / 25.4)
-                )
-                .foregroundStyle(
-                    LinearGradient(colors: [.blue, .cyan], startPoint: .top, endPoint: .bottom)
-                )
+                BarMark(x: .value("Hour", data.hour), y: .value("Precipitation", data.precipitation / 25.4)).foregroundStyle(LinearGradient(colors: [.blue, .cyan], startPoint: .top, endPoint: .bottom))
             }
-            .chartXAxis {
-                AxisMarks(values: .automatic(desiredCount: 8))
-            }
-            .frame(height: 150)
-            .padding()
-            .background(Color.gray.opacity(0.05))
-            .cornerRadius(16)
-            .padding(.horizontal)
+            .chartXAxis { AxisMarks(values: .automatic(desiredCount: 8)) }.frame(height: 150).padding().background(Color.gray.opacity(0.05)).cornerRadius(16).padding(.horizontal)
         }
     }
 }
-
-// MARK: - Daily Forecast Slider
 struct DailyForecastSlider: View {
     let dailyData: [DailyWeatherData]
     @Binding var selectedDayIndex: Int
-    
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("7-Day Forecast")
-                .font(.headline)
-                .padding(.horizontal)
-            
+            Text("7-Day Forecast").font(.headline).padding(.horizontal)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
                     ForEach(Array(dailyData.enumerated()), id: \.element.id) { index, data in
                         VStack(spacing: 8) {
-                            Text(data.date, format: .dateTime.weekday(.abbreviated))
-                                .font(.caption.bold())
-                            Text(data.date, format: .dateTime.month().day())
-                                .font(.caption2)
-                                .foregroundColor(.gray)
-                            
-                            Image(systemName: data.totalPrecipitation > 5 ? "cloud.rain.fill" : "sun.max.fill")
-                                .font(.title3)
-                                .foregroundColor(data.totalPrecipitation > 5 ? .blue : .orange)
-                            
-                            Text("\((data.avgTemperature * 9/5) + 32, specifier: "%.0f")°")
-                                .font(.headline)
-                            
-                            if data.isPrediction {
-                                Image(systemName: "sparkles")
-                                    .font(.caption2)
-                                    .foregroundColor(.purple)
-                            }
-                        }
-                        .frame(width: 80)
-                        .padding(.vertical, 16)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(selectedDayIndex == index ? Color.purple.opacity(0.2) : Color.gray.opacity(0.1))
-                        )
-                        .onTapGesture {
-                            withAnimation {
-                                selectedDayIndex = index
-                            }
-                        }
+                            Text(data.date, format: .dateTime.weekday(.abbreviated)).font(.caption.bold()); Text(data.date, format: .dateTime.month().day()).font(.caption2)
+                            Image(systemName: data.totalPrecipitation > 5 ? "cloud.rain.fill" : "sun.max.fill").font(.title3).foregroundColor(data.totalPrecipitation > 5 ? .blue : .orange)
+                            Text("\((data.avgTemperature * 9/5) + 32, specifier: "%.0f")°").font(.headline)
+                            if data.isPrediction { Image(systemName: "sparkles").font(.caption2).foregroundColor(.purple) }
+                        }.frame(width: 80).padding(.vertical, 16).background(RoundedRectangle(cornerRadius: 16).fill(selectedDayIndex == index ? Color.purple.opacity(0.4) : Color.white.opacity(0.1))).onTapGesture { withAnimation { selectedDayIndex = index } }
                     }
-                }
-                .padding(.horizontal)
+                }.padding(.horizontal)
             }
         }
     }
@@ -721,109 +623,79 @@ struct PlanEventSheet: View {
     @Binding var selectedLocation: CLLocationCoordinate2D?
     let onComplete: (CLLocationCoordinate2D, Date) -> Void
     @Environment(\.dismiss) var dismiss
+    @StateObject private var addressCompleter = AddressCompleter()
+    @State private var searchQuery = ""
+    @State private var isSearching = false
+    @State private var searchError: String?
     
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                // Map
-                // UPDATED: Replaced the gesture with a more robust DragGesture to reliably capture tap locations.
-                MapReader { proxy in
-                    Map(coordinateRegion: $locationManager.region,
-                        interactionModes: .all,
-                        annotationItems: annotations) { item in
-                        MapMarker(coordinate: item.coordinate, tint: .purple)
-                    }
-                    .overlay(alignment: .topTrailing) {
-                        Text("Tap map to select location")
-                            .font(.caption)
-                            .padding(8)
-                            .background(Color.black.opacity(0.7))
-                            .foregroundColor(.white)
-                            .cornerRadius(8)
-                            .padding()
-                    }
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onEnded { value in
-                                if let coordinate = proxy.convert(value.location, from: .local) {
-                                    updateAnnotation(to: coordinate)
-                                }
-                            }
-                    )
+                Map(coordinateRegion: $locationManager.region, interactionModes: [.pan, .zoom], annotationItems: annotations) { item in
+                    MapMarker(coordinate: item.coordinate, tint: .purple)
                 }
-                .frame(height: 300)
-                
-                
+                .frame(height: 250)
+                .overlay { if isSearching { Color.black.opacity(0.3).ignoresSafeArea(); ProgressView("Searching...").tint(.white).foregroundColor(.white) } }
                 ScrollView {
                     VStack(spacing: 20) {
-                        if let coord = selectedCoordinate {
+                        if let searchError = searchError {
+                            Text(searchError).font(.headline).foregroundColor(.red).frame(maxWidth: .infinity).padding().background(Color.red.opacity(0.1)).cornerRadius(12)
+                        } else if let coord = selectedCoordinate {
                             VStack(alignment: .leading, spacing: 8) {
-                                Text("Selected Location")
-                                    .font(.headline)
-                                Text("Lat: \(coord.latitude, specifier: "%.4f"), Lon: \(coord.longitude, specifier: "%.4f")")
-                                    .font(.subheadline)
-                                    .foregroundColor(.gray)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding()
-                            .background(Color.blue.opacity(0.1))
-                            .cornerRadius(12)
+                                Text("Selected Location").font(.headline)
+                                Text("Lat: \(coord.latitude, specifier: "%.4f"), Lon: \(coord.longitude, specifier: "%.4f")").font(.subheadline).foregroundColor(.gray)
+                            }.frame(maxWidth: .infinity, alignment: .leading).padding().background(Color.blue.opacity(0.1)).cornerRadius(12)
                         } else {
-                            Text("Select a location on the map")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.gray.opacity(0.1))
-                                .cornerRadius(12)
+                            Text("Use the search bar to find a location").font(.headline).foregroundColor(.secondary).frame(maxWidth: .infinity).padding().background(Color.gray.opacity(0.1)).cornerRadius(12)
                         }
-                        
-                        DatePicker("Event Date", selection: $selectedDate, in: Date()..., displayedComponents: .date)
-                            .datePickerStyle(GraphicalDatePickerStyle())
-                            .padding()
-                            .background(Color.gray.opacity(0.05))
-                            .cornerRadius(12)
-                        
-                        Button(action: {
-                            if let coord = selectedCoordinate {
-                                onComplete(coord, selectedDate)
-                            }
-                        }) {
-                            Text(isFutureDate() ? "Predict Weather" : "Get Weather")
-                                .font(.headline)
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(selectedCoordinate == nil ? Color.gray : (isFutureDate() ? Color.purple : Color.blue))
-                                .cornerRadius(12)
-                        }
-                        .disabled(selectedCoordinate == nil)
-                    }
-                    .padding()
+                        DatePicker("Event Date", selection: $selectedDate, in: Date()..., displayedComponents: .date).datePickerStyle(GraphicalDatePickerStyle()).padding().background(Color.gray.opacity(0.05)).cornerRadius(12)
+                        Button(action: { if let coord = selectedCoordinate { onComplete(coord, selectedDate) } }) {
+                            Text(isFutureDate() ? "Predict Weather" : "Get Weather").font(.headline).foregroundColor(.white).frame(maxWidth: .infinity).padding().background(selectedCoordinate == nil ? Color.gray : (isFutureDate() ? Color.purple : Color.blue)).cornerRadius(12)
+                        }.disabled(selectedCoordinate == nil)
+                    }.padding()
                 }
             }
-            .navigationTitle("Plan Event")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
+            .navigationTitle("Plan Event").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .navigationBarLeading) { Button("Cancel") { dismiss() } } }
+            .searchable(text: $searchQuery, placement: .navigationBarDrawer(displayMode: .always), prompt: "Enter address or city") {
+                ForEach(addressCompleter.completions, id: \.self) { completion in
+                    VStack(alignment: .leading) {
+                        Text(completion.title).fontWeight(.bold)
+                        Text(completion.subtitle).font(.subheadline).foregroundColor(.secondary)
+                    }.contentShape(Rectangle()).onTapGesture { handleCompletionTapped(completion) }
                 }
             }
+            .onChange(of: searchQuery) { newValue in addressCompleter.queryFragment = newValue; searchError = nil }
         }
     }
     
-    private func updateAnnotation(to coordinate: CLLocationCoordinate2D) {
-        let clampedLat = max(-90, min(90, coordinate.latitude))
-        let clampedLon = max(-180, min(180, coordinate.longitude))
-        let finalCoordinate = CLLocationCoordinate2D(latitude: clampedLat, longitude: clampedLon)
-        
-        selectedCoordinate = finalCoordinate
-        annotations = [IdentifiableCoordinate(coordinate: finalCoordinate)]
+    private func handleCompletionTapped(_ completion: MKLocalSearchCompletion) {
+        let fullAddress = completion.subtitle.isEmpty ? completion.title : "\(completion.title), \(completion.subtitle)"
+        self.searchQuery = fullAddress
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        geocodeAddress(from: fullAddress)
+    }
+    
+    private func geocodeAddress(from address: String) {
+        isSearching = true; searchError = nil
+        let request = MKLocalSearch.Request(); request.naturalLanguageQuery = address
+        let search = MKLocalSearch(request: request)
+        search.start { response, error in
+            DispatchQueue.main.async {
+                self.isSearching = false
+                guard let response = response, let mapItem = response.mapItems.first else {
+                    self.searchError = "Could not find location. Please try a different search."; self.annotations = []; self.selectedCoordinate = nil; return
+                }
+                let coordinate = mapItem.placemark.coordinate
+                self.selectedCoordinate = coordinate; self.annotations = [IdentifiableCoordinate(coordinate: coordinate)]
+                self.locationManager.region = MKCoordinateRegion(center: coordinate, span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05))
+            }
+        }
     }
     
     private func isFutureDate() -> Bool {
         return !Calendar.current.isDateInToday(selectedDate) && selectedDate > Date()
     }
 }
+
+#Preview{ ContentView() }
