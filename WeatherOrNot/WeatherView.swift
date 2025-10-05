@@ -319,6 +319,7 @@ struct ContentView: View {
                         VStack(spacing: 12) {
                             Text("Weather Forecaster")
                                 .font(.system(size: 36, weight: .bold))
+                                Spacer()
                             Text("Plan your events with AI-powered weather predictions")
                                 .font(.subheadline)
                                 .foregroundColor(.gray)
