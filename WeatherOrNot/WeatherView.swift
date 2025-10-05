@@ -1,4 +1,4 @@
-import SwiftUI
+import Swift
 import MapKit
 import Combine
 import CoreML
@@ -319,7 +319,6 @@ struct ContentView: View {
                         VStack(spacing: 12) {
                             Text("Weather Forecaster")
                                 .font(.system(size: 36, weight: .bold))
-                                Spacer()
                             Text("Plan your events with AI-powered weather predictions")
                                 .font(.subheadline)
                                 .foregroundColor(.gray)
@@ -334,6 +333,23 @@ struct ContentView: View {
                                 Image(systemName: "calendar.badge.plus")
                                     .font(.title3)
                                 Text("Plan Event")
+                                    .font(.title3.bold())
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 20)
+                            .background(
+                                LinearGradient(colors: [.blue, .purple], startPoint: .leading, endPoint: .trailing)
+                            )
+                            .cornerRadius(16)
+                            .shadow(color: .blue.opacity(0.4), radius: 10, x: 0, y: 5)
+                        }
+
+                        Button(action: {showingPlanSheet = true}) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "calendar.badge.plus")
+                                    .font(.title3)
+                                Text("Going out Right Now?")
                                     .font(.title3.bold())
                             }
                             .foregroundColor(.white)
