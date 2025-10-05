@@ -3,6 +3,7 @@ import MapKit
 import Combine
 import CoreML
 import Charts
+import GoogleGenerativeAI
 
 // MARK: - Loading Wave Animation
 struct WaveShape: Shape {
@@ -352,6 +353,7 @@ struct IdentifiableCoordinate: Identifiable {
 struct ContentView: View {
     @StateObject private var apiService = NASAPowerService()
     @State private var showingPlanSheet = false
+    @State private var showingGoingOutSheet = false
     @State private var selectedDayIndex = 0
     @State private var selectedHourIndex = 12
     @State private var selectedLocation: CLLocationCoordinate2D?
@@ -370,6 +372,44 @@ struct ContentView: View {
                                 Text("Weather Forecaster").font(.system(size: 36, weight: .bold))
                                 Text("Plan your events with AI-powered weather predictions").font(.subheadline).foregroundColor(.white.opacity(0.8)).multilineTextAlignment(.center).padding(.horizontal)
                             }.colorScheme(.dark); Spacer()
+                                Button(action: { print("View Past Events tapped") }) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "clock.arrow.circlepath")
+                                        .font(.title3)
+                                    Text("View Past Events")
+                                        .font(.title3.bold())
+                                }
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 20)
+                                .background(
+                                    LinearGradient(colors: [.purple, .pink], startPoint: .leading, endPoint: .trailing)
+                                )
+                                .cornerRadius(16)
+                                .shadow(color: .purple.opacity(0.4), radius: 10, x: 0, y: 5)
+                            }
+                            .padding(.horizontal, 30)
+                            Button(action: { showingGoingOutSheet = true }) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "figure.walk.circle.fill")
+                                        .font(.title3)
+                                    Text("Going Outside Right Now?")
+                                        .font(.title3.bold())
+                                }
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 20)
+                                .background(
+                                    LinearGradient(colors: [.green, .mint], startPoint: .leading, endPoint: .trailing)
+                                )
+                                .cornerRadius(16)
+                                .shadow(color: .green.opacity(0.4), radius: 10, x: 0, y: 5)
+                            }
+                            .padding(.horizontal, 30)
+                            .sheet(isPresented: $showingGoingOutSheet) {
+                                GoingOutNowView()
+                            }
+
                             Button(action: { showingPlanSheet = true }) {
                                 HStack(spacing: 12) {
                                     Image(systemName: "calendar.badge.plus").font(.title3)
@@ -755,5 +795,170 @@ struct PlanEventSheet: View {
         return !Calendar.current.isDateInToday(selectedDate) && selectedDate > Date()
     }
 }
+struct GoingOutNowView: View {
+    @Environment(\.dismiss) var dismiss
+    
+    // State for user input and the final AI response
+    @State private var userInputActivity: String = ""
+    @State private var aiSuggestion: String? = nil
+    
+    // State for managing the view's status
+    @State private var isSubmitting = false
+    @State private var submissionError: String?
+    
+    // PLACEHOLDER: You'll replace this with your actual Weather/API data
+    // For this example, we'll use hardcoded current weather data
+    let currentHourWeather: HourlyWeatherData = HourlyWeatherData(
+        id: UUID(),
+        hour: Calendar.current.component(.hour, from: Date()),
+        temperature: 28.0, // 28°C ≈ 82°F
+        precipitation: 0.1, // 0.1 mm/hr (light to none)
+        isPrediction: false
+    )
 
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 30) {
+                Text("What are you going to do outside?")
+                    .font(.title2)
+                    .bold()
+                    .padding(.top)
+
+                // 1. Text Editor for user input
+                TextEditor(text: $userInputActivity)
+                    .frame(height: 120)
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.gray.opacity(0.5), lineWidth: 1))
+                    .padding(.horizontal)
+                    .scrollContentBackground(.hidden)
+                    .background(Color.white.opacity(0.1))
+
+                // 2. Submit Button
+                Button(action: {
+                    // Trigger the submission and Gemini call
+                    Task { await submitActivity() }
+                }) {
+                    if isSubmitting {
+                        ProgressView().progressViewStyle(.circular)
+                    } else {
+                        Text("Get Weather-Ready Suggestion")
+                    }
+                }
+                .font(.headline)
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(userInputActivity.isEmpty || isSubmitting ? Color.gray : Color.green)
+                .cornerRadius(10)
+                .disabled(userInputActivity.isEmpty || isSubmitting)
+                .padding(.horizontal)
+
+                // 3. Display AI Suggestion or Error
+                Group {
+                    if isSubmitting {
+                        Text("Generating tailored suggestion...")
+                            .foregroundColor(.gray)
+                    } else if let error = submissionError {
+                        Text("❌ Error: \(error)").foregroundColor(.red).multilineTextAlignment(.center)
+                    } else if let suggestion = aiSuggestion {
+                        SuggestionCard(suggestion: suggestion)
+                    }
+                }
+                
+                Spacer()
+            }
+            .padding(.vertical)
+            .navigationTitle("Outdoor Planner")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - Core Submission and AI Call Function
+    func submitActivity() async {
+        guard !userInputActivity.isEmpty else { return }
+        
+        // Reset states
+        isSubmitting = true
+        submissionError = nil
+        aiSuggestion = nil
+        
+        do {
+            // 1. Prepare the content for Gemini
+            let prompt = buildGeminiPrompt(activity: userInputActivity, weather: currentHourWeather)
+            
+            // 2. Call the simulated Gemini service
+            // *** In your real app, you would replace this line with your actual API call ***
+            let response = try await simulateGeminiAPICall(prompt: prompt)
+            
+            // 3. Update the UI with the AI's suggestion
+            self.aiSuggestion = response
+        } catch {
+            // Handle any network or API errors
+            self.submissionError = "Failed to get AI suggestion: \(error.localizedDescription)"
+        }
+        
+        isSubmitting = false
+    }
+    
+    // MARK: - Prompt Builder
+    func buildGeminiPrompt(activity: String, weather: HourlyWeatherData) -> String {
+        // Convert the temperature to Fahrenheit for a familiar context
+        let tempF = (weather.temperature * 9/5) + 32
+        let precipIn = weather.precipitation / 25.4
+
+        let prompt = """
+        The user is going outside right now. Their planned activity is: **\(activity)**.
+        The current weather conditions are:
+        - Temperature: \(tempF, specifier: "%.0f")°F (\(weather.temperature, specifier: "%.1f")°C)
+        - Precipitation Rate: \(precipIn, specifier: "%.2f") inches/hour (\(weather.precipitation, specifier: "%.1f") mm/hr)
+
+        Based on the activity and the weather conditions, provide a single, friendly, and practical suggestion on what the user should bring or do to stay safe and comfortable. Keep the suggestion concise and directly relevant.
+        """
+        return prompt
+    }
+}
+
+// MARK: - Component View for Displaying the Suggestion
+struct SuggestionCard: View {
+    let suggestion: String
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("💡 Gemini Suggestion:")
+                .font(.headline)
+                .foregroundColor(.blue)
+            
+            Text(suggestion)
+                .font(.body)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.blue.opacity(0.1))
+                .cornerRadius(10)
+        }
+        .padding(.horizontal)
+    }
+}
+
+// MARK: - API Call Simulation (Replace with your actual Gemini SDK/API code)
+enum GeminiError: Error {
+    case apiError(String)
+}
+
+func callGeminiAPI(prompt: String) async throws -> String {
+    let apiKey = "YOUR_API_KEY" // **SECURITY WARNING: Use an environment variable or secure storage!**
+    let model = GenerativeModel(name: "gemini-2.5-flash", apiKey: apiKey)
+
+    do {
+        let response = try await model.generateContent(prompt)
+        return response.text ?? "AI failed to generate a text response."
+    } catch {
+        throw error
+    }
+}
 #Preview{ ContentView() }
