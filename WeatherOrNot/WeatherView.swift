@@ -39,7 +39,7 @@ struct WaveShape: Shape {
 struct LoadingWaveView: View {
     @State private var phase = 0.0
     @State private var progress = 0.0
-
+    
     var body: some View {
         GeometryReader { geometry in
             ZStack {
@@ -51,17 +51,10 @@ struct LoadingWaveView: View {
                     )
                     .frame(height: geometry.size.height * 2)
                     .offset(y: (1 - progress) * geometry.size.height)
-                
-                VStack {
-                    Spacer()
-                    Text("Fetching Weather Data...")
-                        .font(.title2.bold())
-                        .foregroundColor(.white)
-                        .padding(.bottom, 60)
-                }
             }
         }
         .onAppear {
+            // Wave animation
             withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
                 phase = .pi * 2
             }
@@ -251,6 +244,7 @@ class NASAPowerService: ObservableObject {
             // Simulate a slightly longer loading time to let the animation play
             DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
                 self?.isLoading = false
+                // Fix: Sort by comparing two elements from the array
                 self?.dailyWeatherData = fetchedDailyData.sorted { $0.date < $1.date }
                 if fetchedDailyData.isEmpty {
                     self?.errorMessage = "No data available for the selected location and date range. Please try different parameters."
@@ -387,6 +381,27 @@ struct ContentView: View {
                             }.padding(.horizontal, 30).padding(.bottom, 50)
                         }
                     }
+                    // MARK: - Satellite Connection Indicator
+                    .overlay(alignment: .topLeading) {
+                        HStack(spacing: 6) { // Use HStack for horizontal arrangement of circle and text block
+                            Circle()
+                                .fill(Color.green)
+                                .frame(width: 8, height: 8)
+                            Text("🛰️")
+                            VStack(alignment: .leading, spacing: 2) { // VStack for the two lines of text
+                                Text("Connected to Satellite")
+                                Text("MERRA-2")
+                            }
+                        }
+                        .font(.caption)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.3))
+                        .cornerRadius(10)
+                        .padding(.top, 10)
+                        .padding(.leading, 10)
+                    }
                 } else {
                     WeatherDataView(
                         apiService: apiService,
@@ -486,9 +501,23 @@ struct WeatherDataView: View {
             }
             
             if apiService.isLoading {
-                LoadingWaveView()
-                    .transition(.opacity.animation(.easeIn(duration: 0.5)))
-                    .zIndex(10)
+                ZStack{
+                    
+                        
+                    LoadingWaveView()
+                        .transition(.opacity.animation(.easeIn(duration: 0.5)))
+                        .zIndex(10)
+                        .overlay{
+                            VStack{
+                                Spacer()
+                                Image(systemName: "satellite.fill")
+                                Text("Fetching Data")
+                                    .fontWeight(.heavy)
+                            }
+                                
+                        }
+                    
+                }
             }
         }
         .colorScheme(.dark)
@@ -546,7 +575,7 @@ struct HourlyWeatherSlider: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Hourly Forecast").font(.headline).padding(.horizontal)
+            Text("Hourly Forecast").font(.headline) // Removed .padding(.horizontal)
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
@@ -561,35 +590,53 @@ struct HourlyWeatherSlider: View {
                             .id(index)
                             .onTapGesture { withAnimation { selectedHourIndex = index; proxy.scrollTo(index, anchor: .center) } }
                         }
-                    }.padding(.horizontal)
+                    } // Removed .padding(.horizontal)
                 }.onAppear { proxy.scrollTo(selectedHourIndex, anchor: .center) }
             }
         }
+        .padding(24) // Apply padding to the entire card
+        .background(.thinMaterial)
+        .cornerRadius(20)
+        .padding(.horizontal) // Apply horizontal padding to the card itself
     }
 }
 struct TemperatureChartCard: View {
     let hourlyData: [HourlyWeatherData]
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Temperature Trend").font(.headline).padding([.top, .horizontal])
+            Text("Temperature Trend").font(.headline) // Removed .padding([.top, .horizontal])
             Chart(hourlyData) { data in
                 LineMark(x: .value("Hour", data.hour), y: .value("Temperature", (data.temperature * 9/5) + 32)).foregroundStyle(LinearGradient(colors: [.orange, .red], startPoint: .leading, endPoint: .trailing)).lineStyle(StrokeStyle(lineWidth: 3))
                 AreaMark(x: .value("Hour", data.hour), y: .value("Temperature", (data.temperature * 9/5) + 32)).foregroundStyle(LinearGradient(colors: [.orange.opacity(0.3), .red.opacity(0.1)], startPoint: .top, endPoint: .bottom))
             }
-            .chartXAxis { AxisMarks(values: .automatic(desiredCount: 8)) }.frame(height: 200).padding().background(Color.gray.opacity(0.05)).cornerRadius(16).padding(.horizontal)
+            .chartXAxis { AxisMarks(values: .automatic(desiredCount: 8)) }
+            .frame(height: 200)
+            .padding() // Keep internal padding for chart content
+            // Removed .background(Color.gray.opacity(0.05)).cornerRadius(16).padding(.horizontal)
         }
+        .padding(24) // Apply padding to the entire card
+        .background(.thinMaterial)
+        .cornerRadius(20)
+        .padding(.horizontal) // Apply horizontal padding to the card itself
     }
 }
 struct PrecipitationChartCard: View {
     let hourlyData: [HourlyWeatherData]
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Precipitation").font(.headline).padding([.top, .horizontal])
+            Text("Precipitation").font(.headline) // Removed .padding([.top, .horizontal])
             Chart(hourlyData) { data in
                 BarMark(x: .value("Hour", data.hour), y: .value("Precipitation", data.precipitation / 25.4)).foregroundStyle(LinearGradient(colors: [.blue, .cyan], startPoint: .top, endPoint: .bottom))
             }
-            .chartXAxis { AxisMarks(values: .automatic(desiredCount: 8)) }.frame(height: 150).padding().background(Color.gray.opacity(0.05)).cornerRadius(16).padding(.horizontal)
+            .chartXAxis { AxisMarks(values: .automatic(desiredCount: 8)) }
+            .frame(height: 150)
+            .padding() // Keep internal padding for chart content
+            // Removed .background(Color.gray.opacity(0.05)).cornerRadius(16).padding(.horizontal)
         }
+        .padding(24) // Apply padding to the entire card
+        .background(.thinMaterial)
+        .cornerRadius(20)
+        .padding(.horizontal) // Apply horizontal padding to the card itself
     }
 }
 struct DailyForecastSlider: View {
@@ -597,7 +644,7 @@ struct DailyForecastSlider: View {
     @Binding var selectedDayIndex: Int
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("7-Day Forecast").font(.headline).padding(.horizontal)
+            Text("7-Day Forecast").font(.headline) // Removed .padding(.horizontal)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
                     ForEach(Array(dailyData.enumerated()), id: \.element.id) { index, data in
@@ -608,9 +655,13 @@ struct DailyForecastSlider: View {
                             if data.isPrediction { Image(systemName: "sparkles").font(.caption2).foregroundColor(.purple) }
                         }.frame(width: 80).padding(.vertical, 16).background(RoundedRectangle(cornerRadius: 16).fill(selectedDayIndex == index ? Color.purple.opacity(0.4) : Color.white.opacity(0.1))).onTapGesture { withAnimation { selectedDayIndex = index } }
                     }
-                }.padding(.horizontal)
+                } // Removed .padding(.horizontal)
             }
         }
+        .padding(24) // Apply padding to the entire card
+        .background(.thinMaterial)
+        .cornerRadius(20)
+        .padding(.horizontal) // Apply horizontal padding to the card itself
     }
 }
 
@@ -630,30 +681,37 @@ struct PlanEventSheet: View {
     
     var body: some View {
         NavigationView {
-            VStack(spacing: 0) {
-                Map(coordinateRegion: $locationManager.region, interactionModes: [.pan, .zoom], annotationItems: annotations) { item in
-                    MapMarker(coordinate: item.coordinate, tint: .purple)
+            ScrollView { // Wrap all content in a ScrollView
+                VStack(spacing: 20) {
+                    Map(coordinateRegion: $locationManager.region, interactionModes: [.pan, .zoom], annotationItems: annotations) { item in
+                        MapMarker(coordinate: item.coordinate, tint: .purple)
+                    }
+                    .frame(height: 250)
+                    .cornerRadius(12) // Apply corner radius here
+                    .overlay { if isSearching { Color.black.opacity(0.3).ignoresSafeArea(); ProgressView("Searching...").tint(.white).foregroundColor(.white) } }
+                    .padding(.horizontal) // Add horizontal padding for the map
+                    
+                    if let searchError = searchError {
+                        Text(searchError).font(.headline).foregroundColor(.red).frame(maxWidth: .infinity).padding().background(Color.red.opacity(0.1)).cornerRadius(12)
+                            .padding(.horizontal)
+                    } else if let coord = selectedCoordinate {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Selected Location").font(.headline)
+                            Text("Lat: \(coord.latitude, specifier: "%.4f"), Lon: \(coord.longitude, specifier: "%.4f")").font(.subheadline).foregroundColor(.gray)
+                        }.frame(maxWidth: .infinity, alignment: .leading).padding().background(Color.blue.opacity(0.1)).cornerRadius(12)
+                            .padding(.horizontal)
+                    } else {
+                        Text("Use the search bar to find a location").font(.headline).foregroundColor(.secondary).frame(maxWidth: .infinity).padding().background(Color.gray.opacity(0.1)).cornerRadius(12)
+                            .padding(.horizontal)
+                    }
+                    DatePicker("Event Date", selection: $selectedDate, in: Date()..., displayedComponents: .date).datePickerStyle(GraphicalDatePickerStyle()).padding().background(Color.gray.opacity(0.05)).cornerRadius(12)
+                        .padding(.horizontal)
+                    Button(action: { if let coord = selectedCoordinate { onComplete(coord, selectedDate) } }) {
+                        Text(isFutureDate() ? "Predict Weather" : "Get Weather").font(.headline).foregroundColor(.white).frame(maxWidth: .infinity).padding().background(selectedCoordinate == nil ? Color.gray : (isFutureDate() ? Color.purple : Color.blue)).cornerRadius(12)
+                    }.disabled(selectedCoordinate == nil)
+                        .padding(.horizontal)
                 }
-                .frame(height: 250)
-                .overlay { if isSearching { Color.black.opacity(0.3).ignoresSafeArea(); ProgressView("Searching...").tint(.white).foregroundColor(.white) } }
-                ScrollView {
-                    VStack(spacing: 20) {
-                        if let searchError = searchError {
-                            Text(searchError).font(.headline).foregroundColor(.red).frame(maxWidth: .infinity).padding().background(Color.red.opacity(0.1)).cornerRadius(12)
-                        } else if let coord = selectedCoordinate {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Selected Location").font(.headline)
-                                Text("Lat: \(coord.latitude, specifier: "%.4f"), Lon: \(coord.longitude, specifier: "%.4f")").font(.subheadline).foregroundColor(.gray)
-                            }.frame(maxWidth: .infinity, alignment: .leading).padding().background(Color.blue.opacity(0.1)).cornerRadius(12)
-                        } else {
-                            Text("Use the search bar to find a location").font(.headline).foregroundColor(.secondary).frame(maxWidth: .infinity).padding().background(Color.gray.opacity(0.1)).cornerRadius(12)
-                        }
-                        DatePicker("Event Date", selection: $selectedDate, in: Date()..., displayedComponents: .date).datePickerStyle(GraphicalDatePickerStyle()).padding().background(Color.gray.opacity(0.05)).cornerRadius(12)
-                        Button(action: { if let coord = selectedCoordinate { onComplete(coord, selectedDate) } }) {
-                            Text(isFutureDate() ? "Predict Weather" : "Get Weather").font(.headline).foregroundColor(.white).frame(maxWidth: .infinity).padding().background(selectedCoordinate == nil ? Color.gray : (isFutureDate() ? Color.purple : Color.blue)).cornerRadius(12)
-                        }.disabled(selectedCoordinate == nil)
-                    }.padding()
-                }
+                .padding(.vertical) // Add vertical padding to the VStack contents inside ScrollView
             }
             .navigationTitle("Plan Event").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .navigationBarLeading) { Button("Cancel") { dismiss() } } }
