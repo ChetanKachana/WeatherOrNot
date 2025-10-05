@@ -358,6 +358,7 @@ struct IdentifiableCoordinate: Identifiable {
 struct ContentView: View {
     @StateObject private var apiService = NASAPowerService()
     @State private var showingPlanSheet = false
+    @State private var showingGoingOutSheet = false
     @State private var selectedDayIndex = 0
     @State private var selectedHourIndex = 12
     @State private var selectedLocation: CLLocationCoordinate2D?
@@ -376,6 +377,44 @@ struct ContentView: View {
                                 Text("Weather Forecaster").font(.system(size: 36, weight: .bold))
                                 Text("Plan your events with AI-powered weather predictions").font(.subheadline).foregroundColor(.white.opacity(0.8)).multilineTextAlignment(.center).padding(.horizontal)
                             }.colorScheme(.dark); Spacer()
+                                Button(action: { print("View Past Events tapped") }) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "clock.arrow.circlepath")
+                                        .font(.title3)
+                                    Text("View Past Events")
+                                        .font(.title3.bold())
+                                }
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 20)
+                                .background(
+                                    LinearGradient(colors: [.purple, .pink], startPoint: .leading, endPoint: .trailing)
+                                )
+                                .cornerRadius(16)
+                                .shadow(color: .purple.opacity(0.4), radius: 10, x: 0, y: 5)
+                            }
+                            .padding(.horizontal, 30)
+                            Button(action: { showingGoingOutSheet = true }) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "figure.walk.circle.fill")
+                                        .font(.title3)
+                                    Text("Going Outside Right Now?")
+                                        .font(.title3.bold())
+                                }
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 20)
+                                .background(
+                                    LinearGradient(colors: [.green, .mint], startPoint: .leading, endPoint: .trailing)
+                                )
+                                .cornerRadius(16)
+                                .shadow(color: .green.opacity(0.4), radius: 10, x: 0, y: 5)
+                            }
+                            .padding(.horizontal, 30)
+                            .sheet(isPresented: $showingGoingOutSheet) {
+                                GoingOutNowView()
+                            }
+
                             Button(action: { showingPlanSheet = true }) {
                                 HStack(spacing: 12) {
                                     Image(systemName: "calendar.badge.plus").font(.title3)
@@ -697,5 +736,44 @@ struct PlanEventSheet: View {
         return !Calendar.current.isDateInToday(selectedDate) && selectedDate > Date()
     }
 }
+struct GoingOutNowView: View {
+    @Environment(\.dismiss) var dismiss
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 20) {
+                Text("Going Outside Right Now?")
+                    .font(.largeTitle)
+                    .bold()
+                    .padding(.top)
 
+                Text("Quick forecast for your location:")
+                    .foregroundColor(.gray)
+
+                // Example placeholder — replace with live weather data
+                VStack(spacing: 10) {
+                    Text("🌤 Temperature: 82°F")
+                    Text("💨 Wind: 5 mph")
+                    Text("🌡 Feels like: 85°F")
+                    Text("🌞 UV Index: 6 (High)")
+                }
+                .padding()
+                .frame(maxWidth: .infinity)
+                .background(Color.green.opacity(0.15))
+                .cornerRadius(12)
+                .padding(.horizontal)
+
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("Now Forecast")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
 #Preview{ ContentView() }
