@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		FEFE652C2E935E1200A4528D /* GoogleGenerativeAI in Frameworks */ = {isa = PBXBuildFile; productRef = FEFE652B2E935E1200A4528D /* GoogleGenerativeAI */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		FEFF80442E91C9670084556B /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FEFE652C2E935E1200A4528D /* GoogleGenerativeAI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +117,7 @@
 			);
 			name = WeatherOrNot;
 			packageProductDependencies = (
+				FEFE652B2E935E1200A4528D /* GoogleGenerativeAI */,
 			);
 			productName = WeatherOrNot;
 			productReference = FEFF80362E91C9640084556B /* WeatherOrNot.app */;
@@ -195,6 +201,9 @@
 			);
 			mainGroup = FEFF802D2E91C9640084556B;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				FEFE652A2E935E1200A4528D /* XCRemoteSwiftPackageReference "generative-ai-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = FEFF80372E91C9640084556B /* Products */;
 			projectDirPath = "";
@@ -580,6 +589,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		FEFE652A2E935E1200A4528D /* XCRemoteSwiftPackageReference "generative-ai-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/generative-ai-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.5.6;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		FEFE652B2E935E1200A4528D /* GoogleGenerativeAI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FEFE652A2E935E1200A4528D /* XCRemoteSwiftPackageReference "generative-ai-swift" */;
+			productName = GoogleGenerativeAI;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = FEFF802E2E91C9640084556B /* Project object */;
 }
