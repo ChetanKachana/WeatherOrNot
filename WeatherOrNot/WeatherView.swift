@@ -8,7 +8,7 @@ import GoogleGenerativeAI
 
 // MARK: - Generative AI Setup
 let GEMINI_API_KEY = "AIzaSyBlByVQ2vYjD0OpHYBLmYdOZ9rgHRBowfM" // Replace with your actual key
-let geminiModel = GenerativeModel(name: "gemini-2.5-flash", apiKey: GEMINI_API_KEY)
+let geminiModel = GenerativeModel(name: "gemini-2.5-flash-lite", apiKey: GEMINI_API_KEY)
 enum GeminiError: Error { case emptyResponse }
 
 
@@ -130,6 +130,58 @@ struct AnimatedGradientBackground: View {
 }
 
 // MARK: - Models
+// ▼▼▼▼▼ CHANGE #1 STARTS HERE ▼▼▼▼▼
+struct UserProfile: Codable {
+    var name: String = ""
+    var race: String = ""
+    var gender: String = ""
+    var skinTone: Double = 0.5
+    var age: Int = 30
+    var allergies: String = ""
+    var medicalConditions: String = ""
+
+    // The promptRepresentation property is now part of UserProfile
+    var promptRepresentation: String {
+        var components: [String] = []
+        if !name.isEmpty { components.append("User's name is \(name).") }
+        components.append("User is \(age) years old.")
+        if !gender.isEmpty && gender != "Prefer not to say" { components.append("Gender: \(gender).") }
+        if !allergies.isEmpty { components.append("User has the following allergies: \(allergies). This is critical for outdoor advice.") }
+        if !medicalConditions.isEmpty { components.append("User has the following medical conditions: \(medicalConditions). This is critical for health-related advice.") }
+
+        guard !components.isEmpty else { return "No personal user data provided." }
+        return "Please consider the following user profile for personalized advice:\n" + components.joined(separator: "\n")
+    }
+}
+
+class UserProfileManager: ObservableObject {
+    @Published var profile = UserProfile() {
+        didSet { saveProfile() }
+    }
+
+    private let userDefaultsKey = "userProfileData"
+
+    init() {
+        loadProfile()
+    }
+
+    func saveProfile() {
+        if let encoded = try? JSONEncoder().encode(profile) {
+            UserDefaults.standard.set(encoded, forKey: userDefaultsKey)
+        }
+    }
+
+    func loadProfile() {
+        if let data = UserDefaults.standard.data(forKey: userDefaultsKey),
+           let decoded = try? JSONDecoder().decode(UserProfile.self, from: data) {
+            self.profile = decoded
+        }
+    }
+    
+    // The promptRepresentation property has been removed from here
+}
+// ▲▲▲▲▲ CHANGE #1 ENDS HERE ▲▲▲▲▲
+
 struct PowerAPIResponse: Codable {
     let properties: Properties
     struct Properties: Codable { let parameter: Parameter }
@@ -426,13 +478,15 @@ struct IdentifiableCoordinate: Identifiable {
 struct ContentView: View {
     @StateObject private var apiService = NASAPowerService()
     @StateObject private var locationManager = LocationManager()
+    @StateObject private var userProfileManager = UserProfileManager()
     @State private var showingPlanSheet = false
-    @State private var showingGoingOutSheet = false // New state for Gemini sheet
+    @State private var showingGoingOutSheet = false
     @State private var selectedDayIndex = 0
     @State private var selectedHourIndex = 12
     @State private var selectedLocation: CLLocationCoordinate2D?
     @State private var hasData = false
     @State private var hasLoadedInitialWeather = false
+    @State private var showingProfileSheet = false
     
     var body: some View {
         NavigationView {
@@ -457,7 +511,6 @@ struct ContentView: View {
                                         .padding(.horizontal)
                                 }
                             } else {
-                                // Simplified loading view
                                 VStack(spacing: 20) {
                                     ProgressView()
                                         .scaleEffect(1.5)
@@ -470,7 +523,6 @@ struct ContentView: View {
                             
                             Spacer()
                             
-                            // New "Going Out Now" button
                             Button(action: { showingGoingOutSheet = true }) {
                                 HStack(spacing: 12) {
                                     Image(systemName: "figure.walk.circle.fill").font(.title3)
@@ -504,6 +556,25 @@ struct ContentView: View {
                         .font(.caption).foregroundColor(.white).padding(.horizontal, 10).padding(.vertical, 6)
                         .background(Color.black.opacity(0.3)).cornerRadius(10).padding(.top, 10).padding(.leading, 10)
                     }
+                    .overlay(alignment: .topTrailing) {
+                        Button {
+                            showingProfileSheet = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "person.crop.circle.fill")
+                                    .font(.headline)
+                                Text("Profile")
+                                    .font(.caption).fontWeight(.semibold)
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.black.opacity(0.3))
+                            .cornerRadius(10)
+                            .padding(.top, 10)
+                            .padding(.trailing, 10)
+                        }
+                    }
                 } else {
                     WeatherDataView(
                         apiService: apiService,
@@ -531,10 +602,13 @@ struct ContentView: View {
                 }
             )
         }
-        // New sheet modifier for the Gemini view
+        .sheet(isPresented: $showingProfileSheet) {
+            ProfileView()
+        }
         .sheet(isPresented: $showingGoingOutSheet) {
             GoingOutNowView(currentWeather: apiService.currentWeather)
         }
+        .environmentObject(userProfileManager)
         .onAppear {
             if let location = locationManager.currentLocation, !hasLoadedInitialWeather {
                 apiService.fetchCurrentWeather(latitude: location.latitude, longitude: location.longitude)
@@ -626,7 +700,7 @@ struct WeatherDataView: View {
                             .padding(40).background(.thinMaterial).cornerRadius(20)
                         } else if let day = currentDay {
                             CurrentWeatherCard(day: day, hour: currentHour)
-                            DailySummaryView(day: day) // ** NEW GEMINI SUMMARY VIEW **
+                            DailySummaryView(day: day)
                             HourlyWeatherSlider(hourlyData: day.hourlyData, selectedHourIndex: $selectedHourIndex)
                             DailyForecastSlider(dailyData: apiService.dailyWeatherData, selectedDayIndex: $selectedDayIndex)
                             TemperatureChartCard(hourlyData: day.hourlyData)
@@ -712,15 +786,11 @@ struct CurrentWeatherWelcomeCard: View {
     
     var body: some View {
         ZStack {
-            // Background Layer with its own parallax effect
             RoundedRectangle(cornerRadius: 24)
                 .fill(.ultraThinMaterial)
                 .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 10)
                 .padding(24)
                 
-                // Slower parallax
-            
-            // Foreground Content Layer
             VStack(spacing: 24) {
                 VStack(spacing: 8) {
                     Text("Current Weather").font(.title2.bold()).foregroundColor(.white).offset(x: dragOffset.width * 0.2, y: dragOffset.height * 0.2)
@@ -910,13 +980,16 @@ struct PlanEventSheet: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                Map(coordinateRegion: $mapLocationManager.region, interactionModes: [.pan, .zoom], annotationItems: annotations) { item in
-                    MapMarker(coordinate: item.coordinate, tint: .purple)
-                }
-                .frame(height: 250)
-                .overlay { if isSearching { Color.black.opacity(0.3).ignoresSafeArea(); ProgressView("Searching...").tint(.white).foregroundColor(.white) } }
+                
                 
                 ScrollView {
+                    Map(coordinateRegion: $mapLocationManager.region, interactionModes: [.pan, .zoom], annotationItems: annotations) { item in
+                        MapMarker(coordinate: item.coordinate, tint: .purple)
+                    }
+                    .cornerRadius(15)
+                    .padding()
+                    .frame(height: 250)
+                    .overlay { if isSearching { Color.black.opacity(0.3).ignoresSafeArea(); ProgressView("Searching...").tint(.white).foregroundColor(.white) } }
                     VStack(spacing: 20) {
                         if let searchError = searchError {
                             Text(searchError).font(.headline).foregroundColor(.red).frame(maxWidth: .infinity).padding().background(Color.red.opacity(0.1)).cornerRadius(12)
@@ -981,6 +1054,7 @@ struct PlanEventSheet: View {
 // MARK: - Generative AI Views
 struct DailySummaryView: View {
     let day: DailyWeatherData
+    @EnvironmentObject var userProfileManager: UserProfileManager
     @State private var summary: String = ""
     @State private var isLoading: Bool = false
     @State private var showingPlanActivitySheet = false
@@ -1031,7 +1105,7 @@ struct DailySummaryView: View {
         summary = ""
         Task {
             do {
-                let result = try await GeminiService.summarizeDay(dayData: day)
+                let result = try await GeminiService.summarizeDay(dayData: day, userProfile: userProfileManager.profile)
                 await MainActor.run {
                     withAnimation {
                         self.summary = result
@@ -1052,6 +1126,7 @@ struct DailySummaryView: View {
 
 struct PlanActivityView: View {
     let dayData: DailyWeatherData
+    @EnvironmentObject var userProfileManager: UserProfileManager
     @State private var userInput: String = ""
     @State private var advice: String = ""
     @State private var isLoadingAdvice: Bool = false
@@ -1095,7 +1170,7 @@ struct PlanActivityView: View {
                             isLoadingAdvice = true; advice = ""
                             defer { isLoadingAdvice = false }
                             do {
-                                let result = try await GeminiService.adviseForDay(activity: userInput, dayData: dayData)
+                                let result = try await GeminiService.adviseForDay(activity: userInput, dayData: dayData, userProfile: userProfileManager.profile)
                                 await MainActor.run { advice = result; showAdvice = true }
                             } catch {
                                 await MainActor.run {
@@ -1140,6 +1215,7 @@ struct PlanActivityView: View {
 
 struct GoingOutNowView: View {
     let currentWeather: MeteoCurrentWeather?
+    @EnvironmentObject var userProfileManager: UserProfileManager
     @State private var userInput = ""
     @State private var userResponse = ""
     @State private var advice = ""
@@ -1169,7 +1245,7 @@ struct GoingOutNowView: View {
                     Spacer(minLength: 20)
                     HStack(spacing: 10) {
                         Image(systemName: "pencil.line").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
-                        TextField("Enter Description...", text: $userInput).font(.system(size: 18, weight: .medium)).foregroundStyle(.white)
+                        TextField("Powered by Gemini", text: $userInput).font(.system(size: 18, weight: .medium)).foregroundStyle(.white)
                             .textInputAutocapitalization(.sentences).disableAutocorrection(false)
                     }
                     .padding(.horizontal, 16).frame(height: 56).background(RoundedRectangle(cornerRadius: 16).fill(.ultraThinMaterial))
@@ -1189,7 +1265,8 @@ struct GoingOutNowView: View {
                                     activity: userResponse,
                                     weatherSummary: weatherSummary,
                                     latitude: weather.latitude,
-                                    longitude: weather.longitude
+                                    longitude: weather.longitude,
+                                    userProfile: userProfileManager.profile
                                 )
                                 await MainActor.run { advice = result; showAdvice = true }
                             } catch {
@@ -1241,7 +1318,7 @@ struct AdviceResultView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 20) {
-                Text("Your Advice").font(.largeTitle.bold()).foregroundStyle(.white).padding(.top, 8)
+                Text("Your Advice").font(.largeTitle.bold()).foregroundStyle(.white).padding(.top, 16)
                 ScrollView {
                     Text(advice).font(.title3).foregroundStyle(.white).multilineTextAlignment(.leading)
                         .lineSpacing(8).fixedSize(horizontal: false, vertical: true).padding(20)
@@ -1268,11 +1345,16 @@ struct AdviceResultView: View {
     }
 }
 
+// MARK: - Gemini Service
+// ▼▼▼▼▼ CHANGE #2 STARTS HERE ▼▼▼▼▼
 struct GeminiService {
-    static func advise(activity: String, weatherSummary: String, latitude: Double, longitude: Double) async throws -> String {
+    static func advise(activity: String, weatherSummary: String, latitude: Double, longitude: Double, userProfile: UserProfile) async throws -> String {
+        // Correctly call the property on the userProfile object
+        let profileInfo = userProfile.promptRepresentation
         let prompt = """
-        You are an outdoors advisor. Based on the user's plan, today's weather, and their location (to infer the current time of day),
+        You are an outdoors advisor. Based on the user's plan, today's weather, their location, and their personal profile,
         give short, helpful, actionable advice (under 100 words). Be constructive and discouraging if absolutely necessary (use time as a factor and account for safety).
+        If the user has medical conditions or allergies, tailor your advice to be safe for them. Don't use text formatting.
 
         USER PLAN:
         \(activity)
@@ -1282,6 +1364,8 @@ struct GeminiService {
         
         LOCATION:
         Latitude: \(latitude), Longitude: \(longitude)
+        
+        \(profileInfo)
         """
 
         let response = try await geminiModel.generateContent(prompt)
@@ -1290,7 +1374,7 @@ struct GeminiService {
         return text
     }
     
-    static func summarizeDay(dayData: DailyWeatherData) async throws -> String {
+    static func summarizeDay(dayData: DailyWeatherData, userProfile: UserProfile) async throws -> String {
         guard !dayData.hourlyData.isEmpty else {
             return "Not enough data to generate a summary."
         }
@@ -1300,13 +1384,17 @@ struct GeminiService {
         let low = temps.min() ?? 0
         let totalPrecipitation = dayData.totalPrecipitation
         let dateString = dayData.date.formatted(date: .abbreviated, time: .omitted)
+        // Correctly call the property on the userProfile object
+        let profileInfo = userProfile.promptRepresentation
 
         let prompt = """
         You are a friendly weather concierge. Briefly summarize the weather for \(dateString).
         Mention the high of \(String(format: "%.0f", high))°F and the low of \(String(format: "%.0f", low))°F.
         The total precipitation is \(String(format: "%.2f", totalPrecipitation / 25.4)) inches.
-        Based ONLY on this weather, suggest 2-3 local activities (like 'visit a museum' or 'go for a hike').
-        Be creative and encouraging. Keep the entire response under 75 words.
+        Based ONLY on this weather and the user's profile, suggest 2-3 local activities (like 'visit a museum' or 'go for a hike').
+        Be creative and encouraging. Keep the entire response under 75 words. Don't use text formatting. 
+        
+        \(profileInfo)
         """
         
         let response = try await geminiModel.generateContent(prompt)
@@ -1315,7 +1403,7 @@ struct GeminiService {
         return text
     }
     
-    static func adviseForDay(activity: String, dayData: DailyWeatherData) async throws -> String {
+    static func adviseForDay(activity: String, dayData: DailyWeatherData, userProfile: UserProfile) async throws -> String {
         guard !dayData.hourlyData.isEmpty else {
             return "Not enough data to generate advice."
         }
@@ -1325,13 +1413,17 @@ struct GeminiService {
         let low = temps.min() ?? 0
         let totalPrecipitation = dayData.totalPrecipitation
         let dateString = dayData.date.formatted(date: .abbreviated, time: .omitted)
-        
+        // Correctly call the property on the userProfile object
+        let profileInfo = userProfile.promptRepresentation
+
         let prompt = """
         You are an expert event planning assistant.
         A user wants to '\(activity)' on \(dateString).
         The forecast is a high of \(String(format: "%.0f", high))°F, a low of \(String(format: "%.0f", low))°F, with a total precipitation of \(String(format: "%.2f", totalPrecipitation / 25.4)) inches for the day.
-        Give short, helpful, and actionable advice for their plan. Be friendly and encouraging.
-        Keep the response under 100 words.
+        Give short, helpful, and actionable advice for their plan, keeping their personal profile in mind for safety and relevance. Be friendly and encouraging.
+        Keep the response under 100 words Don't use text formatting.
+        
+        \(profileInfo)
         """
         
         let response = try await geminiModel.generateContent(prompt)
@@ -1340,9 +1432,168 @@ struct GeminiService {
         return text
     }
 }
+// ▲▲▲▲▲ CHANGE #2 ENDS HERE ▲▲▲▲▲
+
+
+// MARK: - Profile View (Updated)
+struct ProfileView: View {
+    @EnvironmentObject var userProfileManager: UserProfileManager
+    @Environment(\.dismiss) var dismiss
+
+    let races = ["Asian", "Black", "Hispanic", "White", "Mixed", "Other", "Prefer not to say"]
+    let genders = ["Male", "Female", "Non-binary", "Other", "Prefer not to say"]
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                DynamicGradientBackground(colors: [.indigo.opacity(0.8), .cyan.opacity(0.8)])
+                    .ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 25) {
+                        // MARK: - Header
+                        VStack(spacing: 8) {
+                            Image(systemName: "person.crop.circle.fill.badge.shield")
+                                .font(.system(size: 80))
+                                .foregroundStyle(.white)
+                                .shadow(color: .black.opacity(0.2), radius: 10)
+                            Text("Your Profile")
+                                .font(.largeTitle.bold())
+                                .foregroundColor(.white)
+                            Text("This info helps personalize your advice.")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
+                        .padding(.top, 40)
+
+                        // MARK: - Card
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("Personal Details").font(.headline).padding(.leading)
+                            
+                            CustomTextField(title: "Name", text: $userProfileManager.profile.name, placeholder: "Enter your name")
+                            
+                            CustomPicker(title: "Gender", selection: $userProfileManager.profile.gender, items: genders)
+                            
+                            CustomStepper(title: "Age", value: $userProfileManager.profile.age, range: 1...120)
+
+                            Text("Health Information").font(.headline).padding(.leading).padding(.top)
+
+                            CustomTextField(title: "Allergies", text: $userProfileManager.profile.allergies, placeholder: "e.g., Pollen, Peanuts")
+                            
+                            CustomTextField(title: "Medical Conditions", text: $userProfileManager.profile.medicalConditions, placeholder: "e.g., Asthma, Diabetes")
+
+                        }
+                        .padding(.horizontal)
+
+                        // MARK: - Save Button
+                        Button(action: {
+                            userProfileManager.saveProfile()
+                            dismiss()
+                        }) {
+                            Label("Save and Close", systemImage: "checkmark.circle.fill")
+                                .fontWeight(.semibold)
+                                .foregroundColor(.white)
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(LinearGradient(colors: [.purple, .blue], startPoint: .leading, endPoint: .trailing))
+                                .cornerRadius(16)
+                                .shadow(color: .blue.opacity(0.3), radius: 10)
+                        }
+                        .padding(.horizontal, 40)
+                        .padding(.vertical, 20)
+                    }
+                }
+            }
+            .navigationBarHidden(true)
+        }
+    }
+}
+
+// MARK: - Profile View Components (Liquid Glass Style)
+struct GlassCardStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding()
+            .background(.ultraThinMaterial)
+            .cornerRadius(16)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(LinearGradient(colors: [.white.opacity(0.5), .white.opacity(0.1)], startPoint: .top, endPoint: .bottom), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.15), radius: 10, y: 5)
+    }
+}
+
+extension View {
+    func glassCardStyle() -> some View {
+        self.modifier(GlassCardStyle())
+    }
+}
+
+struct CustomTextField: View {
+    let title: String
+    @Binding var text: String
+    let placeholder: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.caption).foregroundStyle(.white.opacity(0.8))
+            TextField(placeholder, text: $text)
+                .padding(12)
+                .background(.black.opacity(0.15))
+                .cornerRadius(10)
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.2)))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 10)
+        .glassCardStyle()
+    }
+}
+
+struct CustomPicker: View {
+    let title: String
+    @Binding var selection: String
+    let items: [String]
+
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Picker(title, selection: $selection) {
+                ForEach(items, id: \.self) { item in
+                    Text(item).tag(item)
+                }
+            }
+            .pickerStyle(.menu)
+            .accentColor(.purple)
+        }
+        .glassCardStyle()
+    }
+}
+
+struct CustomStepper: View {
+    let title: String
+    @Binding var value: Int
+    let range: ClosedRange<Int>
+
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text("\(value)").fontWeight(.bold)
+            Stepper(title, value: $value, in: range)
+                .labelsHidden()
+        }
+        .glassCardStyle()
+    }
+}
+
 
 // MARK: - Preview & Extensions
-#Preview{ ContentView() }
+#Preview{
+    ContentView()
+}
 
 extension CLLocationCoordinate2D: Equatable {
     public static func == (lhs: CLLocationCoordinate2D, rhs: CLLocationCoordinate2D) -> Bool {
