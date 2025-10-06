@@ -130,7 +130,7 @@ struct AnimatedGradientBackground: View {
 }
 
 // MARK: - Models
-// ▼▼▼▼▼ CHANGE #1 STARTS HERE ▼▼▼▼▼
+
 struct UserProfile: Codable {
     var name: String = ""
     var race: String = ""
@@ -140,7 +140,7 @@ struct UserProfile: Codable {
     var allergies: String = ""
     var medicalConditions: String = ""
 
-    // The promptRepresentation property is now part of UserProfile
+   
     var promptRepresentation: String {
         var components: [String] = []
         if !name.isEmpty { components.append("User's name is \(name).") }
@@ -178,9 +178,8 @@ class UserProfileManager: ObservableObject {
         }
     }
     
-    // The promptRepresentation property has been removed from here
+    
 }
-// ▲▲▲▲▲ CHANGE #1 ENDS HERE ▲▲▲▲▲
 
 struct PowerAPIResponse: Codable {
     let properties: Properties
@@ -1346,10 +1345,9 @@ struct AdviceResultView: View {
 }
 
 // MARK: - Gemini Service
-// ▼▼▼▼▼ CHANGE #2 STARTS HERE ▼▼▼▼▼
+
 struct GeminiService {
     static func advise(activity: String, weatherSummary: String, latitude: Double, longitude: Double, userProfile: UserProfile) async throws -> String {
-        // Correctly call the property on the userProfile object
         let profileInfo = userProfile.promptRepresentation
         let prompt = """
         You are an outdoors advisor. Based on the user's plan, today's weather, their location, and their personal profile,
@@ -1432,7 +1430,6 @@ struct GeminiService {
         return text
     }
 }
-// ▲▲▲▲▲ CHANGE #2 ENDS HERE ▲▲▲▲▲
 
 
 // MARK: - Profile View (Updated)
