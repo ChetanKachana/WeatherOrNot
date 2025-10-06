@@ -7,8 +7,8 @@ import Foundation
 import GoogleGenerativeAI
 
 // MARK: - Generative AI Setup
-let GEMINI_API_KEY = "AIzaSyAqlx1ly7zCT_r8FMzhBcSUVGHGrq1eP9k" // Replace with your actual key
-let geminiModel = GenerativeModel(name: "gemini-2.5-pro", apiKey: GEMINI_API_KEY)
+let GEMINI_API_KEY = "AIzaSyBlByVQ2vYjD0OpHYBLmYdOZ9rgHRBowfM" // Replace with your actual key
+let geminiModel = GenerativeModel(name: "gemini-2.5-flash", apiKey: GEMINI_API_KEY)
 enum GeminiError: Error { case emptyResponse }
 
 
