@@ -1,5 +1,5 @@
 {
-  "originHash" : "fb9ac36071f364d419c527ac181073d029907ab8c2d0a2cf5e1dbf2b4a353436",
+  "originHash" : "b4f78230045b0c6fd6de72b7dc33df20c42b9093b8dcbc2b6d28e13d152bd662",
   "pins" : [
     {
       "identity" : "generative-ai-swift",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "44b8ce120425f9cf53ca756f3434ca2c2696f8bd",
         "version" : "0.5.6"
+      }
+    },
+    {
+      "identity" : "parallaxswiftui",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Priva28/ParallaxSwiftUI",
+      "state" : {
+        "revision" : "b2bde7ec73e2d6f3d960aa14a125bd9f1f7fa605",
+        "version" : "1.0.5"
       }
     }
   ],

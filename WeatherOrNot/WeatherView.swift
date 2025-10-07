@@ -5,9 +5,11 @@ import CoreML
 import Charts
 import Foundation
 import GoogleGenerativeAI
+import ParallaxSwiftUI
 
 // MARK: - Generative AI Setup
 let GEMINI_API_KEY = "AIzaSyBlByVQ2vYjD0OpHYBLmYdOZ9rgHRBowfM" // Replace with your actual key
+// IMPORTANT: For production apps, store API keys securely, e.g., in a `.plist` file not committed to version control, or using server-side proxies.
 let geminiModel = GenerativeModel(name: "gemini-2.5-flash-lite", apiKey: GEMINI_API_KEY)
 enum GeminiError: Error { case emptyResponse }
 
@@ -67,7 +69,7 @@ struct LoadingWaveView: View {
                 phase = .pi * 2
             }
             
-            withAnimation(.easeInOut(duration: 4.0).delay(0.2)) {
+            withAnimation(.easeInOut(duration: 8.0).delay(0.2)) {
                 progress = 1.0
             }
         }
@@ -486,7 +488,7 @@ struct ContentView: View {
     @State private var hasData = false
     @State private var hasLoadedInitialWeather = false
     @State private var showingProfileSheet = false
-    
+    @State private var dragOffset: CGSize = .zero
     var body: some View {
         NavigationView {
             ZStack {
@@ -498,6 +500,8 @@ struct ContentView: View {
                             
                             if let weather = apiService.currentWeather {
                                 CurrentWeatherWelcomeCard(weather: weather)
+                                   
+                                   
                             } else if let error = locationManager.locationError {
                                 VStack(spacing: 16) {
                                     Image(systemName: "location.slash.fill")
@@ -605,7 +609,8 @@ struct ContentView: View {
             ProfileView()
         }
         .sheet(isPresented: $showingGoingOutSheet) {
-            GoingOutNowView(currentWeather: apiService.currentWeather)
+            // Pass the current UserProfile to GoingOutNowView
+            GoingOutNowView(currentWeather: apiService.currentWeather, userProfile: userProfileManager.profile)
         }
         .environmentObject(userProfileManager)
         .onAppear {
@@ -657,6 +662,29 @@ struct ContentView: View {
     }
 }
 
+// MARK: - Loading Message Enum
+enum LoadingPhase: CaseIterable {
+    case talkingWithMERRA2
+    case makingPredictions
+    case askingDelphi
+
+    var message: String {
+        switch self {
+        case .talkingWithMERRA2: return "Talking with MERRA-2..."
+        case .makingPredictions: return "Making Predictions..."
+        case .askingDelphi: return "Asking Delphi..."
+        }
+    }
+
+    var imageName: String {
+        switch self {
+        case .talkingWithMERRA2: return "SAT"
+        case .makingPredictions: return "BALL"
+        case .askingDelphi: return "MAGIC"
+        }
+    }
+}
+
 // MARK: - Weather Data View
 struct WeatherDataView: View {
     @ObservedObject var apiService: NASAPowerService
@@ -664,6 +692,10 @@ struct WeatherDataView: View {
     @Binding var selectedHourIndex: Int
     let onPlanNewEvent: () -> Void
     
+    @State private var currentLoadingPhase: LoadingPhase = .talkingWithMERRA2
+    @State private var loadingMessageTask: Task<Void, Never>? = nil
+    @State private var satImageScale: CGFloat = 1.0
+
     var currentDay: DailyWeatherData? {
         guard !apiService.dailyWeatherData.isEmpty, selectedDayIndex < apiService.dailyWeatherData.count else { return nil }
         return apiService.dailyWeatherData[selectedDayIndex]
@@ -719,11 +751,26 @@ struct WeatherDataView: View {
                         .overlay{
                             VStack{
                                 Spacer()
-                                Image(systemName: "satellite.fill").font(.largeTitle).padding()
-                                Text("Talking with MERRA-2...").fontWeight(.heavy)
+                                Image(currentLoadingPhase.imageName)
+                                    .resizable()
+                                    .frame(width:24, height:24)
+                                    .scaleEffect(satImageScale)
+                                HStack{
+                                    Text(currentLoadingPhase.message).fontWeight(.heavy)
+                                }
                                 Spacer()
                             }
                         }
+                }
+                .onAppear {
+                    startLoadingMessageSequence()
+                    withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                        satImageScale = 1.2
+                    }
+                }
+                .onDisappear {
+                    loadingMessageTask?.cancel()
+                    satImageScale = 1.0
                 }
             }
             
@@ -743,12 +790,32 @@ struct WeatherDataView: View {
         }
         .colorScheme(.dark)
     }
+
+    private func startLoadingMessageSequence() {
+        loadingMessageTask?.cancel()
+        currentLoadingPhase = .talkingWithMERRA2
+
+        loadingMessageTask = Task {
+            do {
+                try await Task.sleep(nanoseconds: 3 * 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                await MainActor.run { currentLoadingPhase = .makingPredictions }
+
+                try await Task.sleep(nanoseconds: 4 * 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                await MainActor.run { currentLoadingPhase = .askingDelphi }
+
+            } catch {
+                print("Loading message sequence was cancelled.")
+            }
+        }
+    }
 }
 
 // MARK: - Cards and Sliders
 struct CurrentWeatherWelcomeCard: View {
     let weather: MeteoCurrentWeather
-    @State private var dragOffset: CGSize = .zero
+    
     
     var weatherIcon: String {
         let code = weather.current.weather_code
@@ -782,65 +849,85 @@ struct CurrentWeatherWelcomeCard: View {
         default: return "Unknown"
         }
     }
-    
+  
+    @State private var rotationX: Double = 0.0
+    @State private var rotationY: Double = 0.0
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 24)
-                .fill(.ultraThinMaterial)
-                .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 10)
-                .padding(24)
-                
-            VStack(spacing: 24) {
-                VStack(spacing: 8) {
-                    Text("Current Weather").font(.title2.bold()).foregroundColor(.white).offset(x: dragOffset.width * 0.2, y: dragOffset.height * 0.2)
-                    Text("Your Location").font(.subheadline).foregroundColor(.white.opacity(0.7)).offset(x: dragOffset.width * 0.15, y: dragOffset.height * 0.15)
-                }
-                
-                Image(systemName: weatherIcon)
-                    .font(.system(size: 80)).foregroundStyle(LinearGradient(colors: [.orange, .yellow], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .shadow(color: .orange.opacity(0.3), radius: 10).offset(x: dragOffset.width * 0.4, y: dragOffset.height * 0.4)
-                
-                VStack(spacing: 4) {
-                    Text("\(Int(weather.current.temperature_2m))°F").font(.system(size: 64, weight: .bold)).foregroundColor(.white).offset(x: dragOffset.width * 0.25, y: dragOffset.height * 0.25)
-                    Text(weatherDescription).font(.title3).foregroundColor(.white.opacity(0.9)).offset(x: dragOffset.width * 0.2, y: dragOffset.height * 0.2)
-                }
-                
-                HStack(spacing: 40) {
-                    VStack(spacing: 8) {
-                        Image(systemName: "humidity.fill").font(.title2).foregroundColor(.blue)
-                        Text("\(weather.current.relative_humidity_2m)%").font(.headline).foregroundColor(.white)
-                        Text("Humidity").font(.caption).foregroundColor(.white.opacity(0.7))
-                    }.offset(x: dragOffset.width * 0.3, y: dragOffset.height * 0.3)
+        GeometryReader { proxy in
+            let size = proxy.size
+            let maxRotation: Double = 15.0
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 24)
+                    .foregroundStyle(Color.gray)
                     
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                VStack(spacing: 24) {
                     VStack(spacing: 8) {
-                        Image(systemName: "wind").font(.title2).foregroundColor(.cyan)
-                        Text("\(Int(weather.current.wind_speed_10m)) mph").font(.headline).foregroundColor(.white)
-                        Text("Wind").font(.caption).foregroundColor(.white.opacity(0.7))
-                    }.offset(x: dragOffset.width * 0.35, y: dragOffset.height * 0.35)
+                        Text("Current Weather").font(.title2.bold()).foregroundColor(.white)
+                        Text("Your Location").font(.subheadline).foregroundColor(.white.opacity(0.7))
+                    }
                     
-                    VStack(spacing: 8) {
-                        Image(systemName: "drop.fill").font(.title2).foregroundColor(.blue)
-                        Text(String(format: "%.2f\"", weather.current.precipitation)).font(.headline).foregroundColor(.white)
-                        Text("Rain").font(.caption).foregroundColor(.white.opacity(0.7))
-                    }.offset(x: dragOffset.width * 0.4, y: dragOffset.height * 0.4)
+                    Image(systemName: weatherIcon)
+                        .font(.system(size: 80))
+                        .foregroundStyle(LinearGradient(colors: [.orange, .yellow], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .shadow(color: .orange.opacity(0.3), radius: 10)
+                    
+                    VStack(spacing: 4) {
+                        Text("\(Int(weather.current.temperature_2m))°F").font(.system(size: 64, weight: .bold)).foregroundColor(.white)
+                        Text(weatherDescription).font(.title3).foregroundColor(.white.opacity(0.9))
+                    }
+                    
+                    HStack(spacing: 40) {
+                        VStack(spacing: 8) {
+                            Image(systemName: "humidity.fill").font(.title2).foregroundColor(.blue)
+                            Text("\(weather.current.relative_humidity_2m)%").font(.headline).foregroundColor(.white)
+                            Text("Humidity").font(.caption).foregroundColor(.white.opacity(0.7))
+                        }
+                        
+                        VStack(spacing: 8) {
+                            Image(systemName: "wind").font(.title2).foregroundColor(.cyan)
+                            Text("\(Int(weather.current.wind_speed_10m)) mph").font(.headline).foregroundColor(.white)
+                            Text("Wind").font(.caption).foregroundColor(.white.opacity(0.7))
+                        }
+                        
+                        VStack(spacing: 8) {
+                            Image(systemName: "drop.fill").font(.title2).foregroundColor(.blue)
+                            Text(String(format: "%.2f\"", weather.current.precipitation)).font(.headline).foregroundColor(.white)
+                            Text("Rain").font(.caption).foregroundColor(.white.opacity(0.7))
+                        }
+                    }
+                    Text("Data from Open-Meteo").font(.caption)
                 }
-            }
-            .padding(32)
+                
+                .padding(32)             }
+            .drawingGroup()
+            
+            .padding(24)
+            .rotation3DEffect(.degrees(rotationX * -1.5), axis: (x: 1, y: 0, z: 0), perspective: 1)
+            .rotation3DEffect(.degrees(rotationY * 1.5), axis: (x: 0, y: 1, z: 0), perspective: 1)
+            .offset(x: rotationY * 0.5, y: rotationX * 0.5)
+            // The gesture logic
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        rotationX = (value.location.y - size.height / 2) / (size.height / 2) * maxRotation
+                        rotationY = (value.location.x - size.width / 2) / (size.width / 2) * -maxRotation
+                    }
+                    .onEnded { _ in
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) {
+                            rotationX = 0
+                            rotationY = 0
+                        }
+                    }
+            )
         }
         .padding(.horizontal, 24)
-        .rotation3DEffect(.degrees(dragOffset.width / 20), axis: (x: 0, y: 1, z: 0))
-        .rotation3DEffect(.degrees(-dragOffset.height / 20), axis: (x: 1, y: 0, z: 0))
-        .gesture(
-            DragGesture()
-                .onChanged { value in
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                        dragOffset = value.translation
-                    }
-                }
-                .onEnded { _ in withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) { dragOffset = .zero } }
-        )
     }
-}
+    }
+    
+
 
 struct CurrentWeatherCard: View {
     let day: DailyWeatherData
@@ -975,36 +1062,49 @@ struct PlanEventSheet: View {
     @State private var searchQuery = ""
     @State private var isSearching = false
     @State private var searchError: String?
+
+    // Stable minimum date for the DatePicker
+    private var minimumSelectableDate: Date {
+        Calendar.current.startOfDay(for: Date())
+    }
     
     var body: some View {
         NavigationView {
-            VStack(spacing: 0) {
+            ZStack {
+                DynamicGradientBackground(colors: [.blue.opacity(0.7), .cyan.opacity(0.7)]) // Lighter animated background
+                    .ignoresSafeArea()
                 
-                
-                ScrollView {
-                    Map(coordinateRegion: $mapLocationManager.region, interactionModes: [.pan, .zoom], annotationItems: annotations) { item in
-                        MapMarker(coordinate: item.coordinate, tint: .purple)
-                    }
-                    .cornerRadius(15)
-                    .padding()
-                    .frame(height: 250)
-                    .overlay { if isSearching { Color.black.opacity(0.3).ignoresSafeArea(); ProgressView("Searching...").tint(.white).foregroundColor(.white) } }
-                    VStack(spacing: 20) {
-                        if let searchError = searchError {
-                            Text(searchError).font(.headline).foregroundColor(.red).frame(maxWidth: .infinity).padding().background(Color.red.opacity(0.1)).cornerRadius(12)
-                        } else if let coord = selectedCoordinate {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Selected Location").font(.headline)
-                                Text("Lat: \(coord.latitude, specifier: "%.4f"), Lon: \(coord.longitude, specifier: "%.4f")").font(.subheadline).foregroundColor(.gray)
-                            }.frame(maxWidth: .infinity, alignment: .leading).padding().background(Color.blue.opacity(0.1)).cornerRadius(12)
-                        } else {
-                            Text("Use the search bar to find a location").font(.headline).foregroundColor(.secondary).frame(maxWidth: .infinity).padding().background(Color.gray.opacity(0.1)).cornerRadius(12)
+                VStack(spacing: 0) {
+                    
+                    ScrollView {
+                        Map(coordinateRegion: $mapLocationManager.region, interactionModes: [.pan, .zoom], annotationItems: annotations) { item in
+                            MapMarker(coordinate: item.coordinate, tint: .purple)
                         }
-                        DatePicker("Event Date", selection: $selectedDate, in: Date()..., displayedComponents: .date).datePickerStyle(GraphicalDatePickerStyle()).padding().background(Color.gray.opacity(0.05)).cornerRadius(12)
-                        Button(action: { if let coord = selectedCoordinate { onComplete(coord, selectedDate) } }) {
-                            Text(isFutureDate() ? "Predict Weather" : "Get Weather").font(.headline).foregroundColor(.white).frame(maxWidth: .infinity).padding().background(selectedCoordinate == nil ? Color.gray : (isFutureDate() ? Color.purple : Color.blue)).cornerRadius(12)
-                        }.disabled(selectedCoordinate == nil)
-                    }.padding()
+                        .cornerRadius(15)
+                        .padding()
+                        .frame(height: 250)
+                        .overlay { if isSearching { Color.black.opacity(0.3).ignoresSafeArea(); ProgressView("Searching...").tint(.white).foregroundColor(.white) } }
+                        VStack(spacing: 20) {
+                            if let searchError = searchError {
+                                Text(searchError).font(.headline).foregroundColor(.red).frame(maxWidth: .infinity).padding().background(Color.red.opacity(0.1)).cornerRadius(12)
+                            } else if let coord = selectedCoordinate {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Selected Location").font(.headline)
+                                    Text("Lat: \(coord.latitude, specifier: "%.4f"), Lon: \(coord.longitude, specifier: "%.4f")").font(.subheadline).foregroundColor(.gray)
+                                }.frame(maxWidth: .infinity, alignment: .leading).padding().background(Color.blue.opacity(0.1)).cornerRadius(12)
+                            } else {
+                                Text("Use the search bar to find a location").font(.headline).foregroundColor(.secondary).frame(maxWidth: .infinity).padding().background(Color.gray.opacity(0.1)).cornerRadius(12)
+                            }
+                            DatePicker("Event Date", selection: $selectedDate, in: minimumSelectableDate..., displayedComponents: .date)
+                                .datePickerStyle(GraphicalDatePickerStyle())
+                                .padding()
+                                .background(.ultraThinMaterial) // Changed to darker background
+                                .cornerRadius(12)
+                            Button(action: { if let coord = selectedCoordinate { onComplete(coord, selectedDate) } }) {
+                                Text(isFutureDate() ? "Predict Weather" : "Get Weather").font(.headline).foregroundColor(.white).frame(maxWidth: .infinity).padding().background(selectedCoordinate == nil ? Color.gray : (isFutureDate() ? Color.purple : Color.blue)).cornerRadius(12)
+                            }.disabled(selectedCoordinate == nil)
+                        }.padding()
+                    }
                 }
             }
             .navigationTitle("Plan Event").navigationBarTitleDisplayMode(.inline)
@@ -1050,7 +1150,165 @@ struct PlanEventSheet: View {
     }
 }
 
-// MARK: - Generative AI Views
+// MARK: - Chat Message Models and Views (NEW)
+
+/// Represents a single message in the chat.
+struct ChatMessage: Identifiable, Equatable {
+    let id = UUID()
+    let content: String
+    let isFromUser: Bool // true for user, false for Gemini
+}
+
+/// A SwiftUI view for displaying a single chat message bubble.
+struct ChatMessageBubble: View {
+    let message: ChatMessage
+    @State private var showGeminiGlow: Bool = false // State for Gemini glow animation
+
+    var body: some View {
+        HStack {
+            if message.isFromUser {
+                Spacer()
+            }
+            Text(message.content)
+                .padding(12)
+                .background(message.isFromUser ? Color.blue.opacity(0.8) : Color.purple.opacity(0.8)) // Blue for user, Purple for Gemini
+                .foregroundColor(.white)
+                .cornerRadius(15)
+                .shadow(color: .black.opacity(0.1), radius: 5, x: 0, y: 2) // General shadow
+                // Conditional glow for Gemini messages
+                .shadow(color: showGeminiGlow ? Color.purple.opacity(0.7) : .clear, radius: showGeminiGlow ? 15 : 0)
+                .onAppear {
+                    if !message.isFromUser { // Only for Gemini messages
+                        Task {
+                            withAnimation(.easeOut(duration: 0.4)) { // Fade in glow
+                                showGeminiGlow = true
+                            }
+                            try? await Task.sleep(nanoseconds: 1_000_000_000) // Hold glow for 1 second
+                            withAnimation(.easeIn(duration: 0.6)) { // Fade out glow
+                                showGeminiGlow = false
+                            }
+                        }
+                    }
+                }
+            if !message.isFromUser {
+                Spacer()
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 4)
+        // Apply transition for messages appearing
+        .transition(
+            .asymmetric(
+                insertion: .move(edge: message.isFromUser ? .trailing : .leading).combined(with: .opacity),
+                removal: .opacity // Simple fade out for removal
+            )
+        )
+    }
+}
+
+/// Manages a Gemini chat session, including message history and API calls.
+class GeminiChatSession: ObservableObject {
+    @Published var messages: [ChatMessage] = []
+    @Published var isLoading: Bool = false
+    @Published var errorMessage: String? = nil
+
+    private var chat: Chat?
+    private let dayData: DailyWeatherData? // Specific to PlanActivityView
+    private let currentWeather: MeteoCurrentWeather? // Specific to GoingOutNowView
+    private let userProfile: UserProfile // Common
+
+    init(dayData: DailyWeatherData? = nil, currentWeather: MeteoCurrentWeather? = nil, userProfile: UserProfile) {
+        self.dayData = dayData
+        self.currentWeather = currentWeather
+        self.userProfile = userProfile
+        startNewChat() // Initialize chat session immediately
+    }
+
+    func startNewChat() {
+        chat = geminiModel.startChat()
+        self.messages = []
+        self.errorMessage = nil
+
+        // Add an initial greeting from the AI
+        var greeting: String
+        if let dayData = dayData {
+            greeting = "Hello! I can help you plan for \(dayData.date.formatted(date: .abbreviated, time: .omitted)). What activity are you thinking of?"
+        } else if let currentWeather = currentWeather {
+            greeting = "Hi there! I'm ready to help you with your plans based on the current weather. What are you doing right now?"
+        } else {
+            greeting = "Hello! How can I assist you with your weather-related plans today?"
+        }
+        
+        withAnimation(.easeOut(duration: 0.3)) { // Animate the initial greeting
+            self.messages.append(ChatMessage(content: greeting, isFromUser: false))
+        }
+    }
+
+    func sendUserMessage(activity: String) async {
+        await MainActor.run {
+            withAnimation(.easeOut(duration: 0.3)) { // Animate user message
+                self.messages.append(ChatMessage(content: activity, isFromUser: true))
+            }
+            self.isLoading = true
+            self.errorMessage = nil
+            // Dismiss the keyboard immediately after user sends message
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+
+        do {
+            // Construct the full prompt for this turn, including initial context and user's message
+            let fullPrompt = buildCurrentTurnPrompt(for: activity)
+            
+            // The `Chat` object manages the history. We just send the current "turn" with necessary context.
+            let response = try await chat!.sendMessage(fullPrompt)
+            let text = response.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+            guard !text.isEmpty else { throw GeminiError.emptyResponse }
+
+            await MainActor.run {
+                withAnimation(.easeOut(duration: 0.3)) { // Animate Gemini response
+                    self.messages.append(ChatMessage(content: text, isFromUser: false))
+                }
+            }
+        } catch {
+            await MainActor.run {
+                self.errorMessage = "Could not retrieve advice: \(error.localizedDescription)"
+            }
+            print("Gemini chat error:", error)
+        }
+        await MainActor.run { self.isLoading = false }
+    }
+
+    private func buildCurrentTurnPrompt(for activity: String) -> String {
+        var promptComponents: [String] = []
+
+        // 1. Core AI persona and constraints
+        promptComponents.append("Your name is Delphi, and you are an AI powered by google. You are an outdoors advisor. Provide helpful, actionable advice. Be constructive and discouraging if absolutely necessary (e.g., for safety reasons or bad weather). If the user has medical conditions or allergies, tailor your advice to be safe for them. Keep responses concise, under 100 words. Do NOT use text formatting like bolding or italics. If the user isn't asking about something regarding weather, respond accordingly, but also ask the user if they need help with making plans.")
+
+        // 2. User Profile
+        promptComponents.append(userProfile.promptRepresentation)
+
+        // 3. Specific weather context
+        if let dayData = dayData {
+            let temps = dayData.hourlyData.map { ($0.temperature * 9/5) + 32 }
+            let high = temps.max() ?? 0
+            let low = temps.min() ?? 0
+            let totalPrecipitation = dayData.totalPrecipitation
+            let dateString = dayData.date.formatted(date: .abbreviated, time: .omitted)
+            promptComponents.append("FORECAST FOR \(dateString): High of \(String(format: "%.0f", high))°F, low of \(String(format: "%.0f", low))°F. Total precipitation: \(String(format: "%.2f", totalPrecipitation / 25.4)) inches.")
+        } else if let weather = currentWeather {
+            promptComponents.append("CURRENT WEATHER: \(Int(weather.current.temperature_2m))°F, with wind speeds of \(Int(weather.current.wind_speed_10m)) mph and a \(weather.current.precipitation > 0 ? "chance" : "low chance") of rain. Location: Lat: \(weather.latitude), Lon: \(weather.longitude).")
+        }
+
+        // 4. Current user activity/question
+        promptComponents.append("USER'S CURRENT INPUT: \(activity)")
+
+        return promptComponents.joined(separator: "\n\n")
+    }
+}
+
+
+// MARK: - Generative AI Views (Updated)
 struct DailySummaryView: View {
     let day: DailyWeatherData
     @EnvironmentObject var userProfileManager: UserProfileManager
@@ -1095,7 +1353,8 @@ struct DailySummaryView: View {
         .onAppear(perform: generateSummary)
         .onChange(of: day.id) { _ in generateSummary() }
         .sheet(isPresented: $showingPlanActivitySheet) {
-            PlanActivityView(dayData: day)
+            // Pass the current UserProfile to PlanActivityView
+            PlanActivityView(dayData: day, userProfile: userProfileManager.profile)
         }
     }
     
@@ -1123,20 +1382,19 @@ struct DailySummaryView: View {
     }
 }
 
+// PlanActivityView now becomes a chat view (updated)
 struct PlanActivityView: View {
     let dayData: DailyWeatherData
-    @EnvironmentObject var userProfileManager: UserProfileManager
+    let userProfile: UserProfile // Passed directly from ContentView
     @State private var userInput: String = ""
-    @State private var advice: String = ""
-    @State private var isLoadingAdvice: Bool = false
-    @State private var showAdvice: Bool = false
+    @StateObject private var chatSession: GeminiChatSession // Manages the chat
     @Environment(\.dismiss) var dismiss
-    
-    private var daySummary: String {
-        let temps = dayData.hourlyData.map { ($0.temperature * 9/5) + 32 }
-        let high = temps.max() ?? 0
-        let low = temps.min() ?? 0
-        return "Forecast for \(dayData.date.formatted(date: .abbreviated, time: .omitted)): High of \(String(format: "%.0f", high))°F, low of \(String(format: "%.0f", low))°F."
+
+    init(dayData: DailyWeatherData, userProfile: UserProfile) {
+        self.dayData = dayData
+        self.userProfile = userProfile
+        // Initialize chatSession with the specific dayData and userProfile
+        _chatSession = StateObject(wrappedValue: GeminiChatSession(dayData: dayData, userProfile: userProfile))
     }
     
     var body: some View {
@@ -1144,234 +1402,205 @@ struct PlanActivityView: View {
             ZStack {
                 DynamicGradientBackground(colors: [.blue, .indigo, .purple]).ignoresSafeArea()
                 
-                VStack(spacing: 22) {
-                    VStack(spacing: 8) {
-                        Text("Plan an Activity").font(.largeTitle.bold()).multilineTextAlignment(.center).foregroundStyle(.white)
-                        Text(daySummary).font(.body).multilineTextAlignment(.center)
+                VStack(spacing: 10) {
+                    VStack(spacing: 2) {
+                        HStack{
+                            Image(systemName: "sparkles")
+                                .resizable()
+                                .frame(width: 24, height: 24)
+                                .foregroundStyle(Color.yellow)
+                            Text("Plan with Delphi").font(.largeTitle.bold()).multilineTextAlignment(.center).foregroundStyle(.white)
+                        }
+                        Text("Day Forecast: \(dayData.date.formatted(date: .abbreviated, time: .omitted))").font(.body).multilineTextAlignment(.center)
                             .foregroundStyle(.white.opacity(0.85)).padding(.horizontal)
                     }.padding(.top, 40)
                     
-                    Spacer(minLength: 20)
-                    
-                    HStack(spacing: 10) {
-                        Image(systemName: "pencil.line").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
-                        TextField("e.g., 'Go for a long run'", text: $userInput).font(.system(size: 18, weight: .medium)).foregroundStyle(.white)
-                            .textInputAutocapitalization(.sentences).disableAutocorrection(false)
-                    }
-                    .padding(.horizontal, 16).frame(height: 56).background(RoundedRectangle(cornerRadius: 16).fill(.ultraThinMaterial))
-                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(LinearGradient(colors: [.white.opacity(0.8), .white.opacity(0.2)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
-                    .shadow(color: .black.opacity(0.35), radius: 12, x: 0, y: 8).shadow(color: .white.opacity(0.12), radius: 4, x: 0, y: 1)
-                    .padding(.horizontal, 24)
-                    
-                    Button {
-                        Task {
-                            guard !userInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                            isLoadingAdvice = true; advice = ""
-                            defer { isLoadingAdvice = false }
-                            do {
-                                let result = try await GeminiService.adviseForDay(activity: userInput, dayData: dayData, userProfile: userProfileManager.profile)
-                                await MainActor.run { advice = result; showAdvice = true }
-                            } catch {
-                                await MainActor.run {
-                                    advice = "Could not retrieve advice. Please try again."; showAdvice = true
+                    ScrollView {
+                        ScrollViewReader { proxy in
+                            VStack(spacing: 0) {
+                                ForEach(chatSession.messages) { message in
+                                    ChatMessageBubble(message: message)
+                                        .id(message.id) // Assign ID for scrolling
                                 }
-                                print("Gemini error:", error)
+                                if chatSession.isLoading {
+                                    // Show a subtle loading indicator for Gemini's response
+                                    HStack {
+                                        ProgressView().tint(.purple)
+                                            .scaleEffect(0.8)
+                                            .padding(.leading, 12)
+                                            .padding(.vertical, 4)
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal)
+                                    .padding(.vertical, 4)
+                                }
+                            }
+                            .onChange(of: chatSession.messages.count) { _ in
+                                // Scroll to the bottom when a new message is added
+                                if let lastMessage = chatSession.messages.last {
+                                    withAnimation { // Animate the scroll
+                                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                                    }
+                                }
                             }
                         }
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "sparkles")
-                            Text(isLoadingAdvice ? "Getting Advice..." : "Get Advice").fontWeight(.semibold)
-                        }
-                        .frame(maxWidth: .infinity).padding(.vertical, 16).foregroundStyle(.white)
-                        .background(LinearGradient(colors: [.cyan, .blue], startPoint: .leading, endPoint: .trailing))
-                        .clipShape(RoundedRectangle(cornerRadius: 14)).shadow(color: .blue.opacity(0.35), radius: 12, x: 0, y: 6)
                     }
-                    .padding(.horizontal, 24).disabled(isLoadingAdvice)
+                    .padding(.top, 10)
                     
-                    Spacer()
-                    
-                    Button { dismiss() } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "xmark.circle.fill"); Text("Close").fontWeight(.semibold)
+                    HStack(spacing: 10) {
+                        TextField("e.g., 'Go for a long run'", text: $userInput)
+                            .font(.system(size: 18, weight: .light))
+                            .foregroundStyle(.white)
+                            .textInputAutocapitalization(.sentences)
+                            .disableAutocorrection(false)
+                            .padding(.horizontal, 16)
+                            .frame(height: 56)
+                            .background(RoundedRectangle(cornerRadius: 50).fill(.ultraThinMaterial))
+                        
+                        Button {
+                            Task {
+                                let message = userInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !message.isEmpty else { return }
+                                userInput = "" // Clear input field immediately
+                                await chatSession.sendUserMessage(activity: message)
+                            }
+                        } label: {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 32, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 56, height: 56)
+                                .background(LinearGradient(colors: [.blue, .purple], startPoint: .leading, endPoint: .trailing))
+                                .clipShape(Circle())
+                                .shadow(color: .purple.opacity(0.35), radius: 12, x: 0, y: 6)
                         }
-                        .frame(maxWidth: .infinity).padding(.vertical, 16).foregroundStyle(.white)
-                        .background(RoundedRectangle(cornerRadius: 14).fill(.ultraThinMaterial))
-                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.35), lineWidth: 1))
+                        .disabled(chatSession.isLoading || userInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
-                    .padding(.horizontal, 24).padding(.bottom, 30)
-                }
-                if isLoadingAdvice {
-                    Color.black.opacity(0.3).ignoresSafeArea()
-                    ProgressView("Analyzing your plan...").tint(.white).foregroundColor(.white).scaleEffect(1.2)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 30)
                 }
             }
-            .navigationBarHidden(true)
-            .navigationDestination(isPresented: $showAdvice) { AdviceResultView(advice: advice) }
+            .background(.clear).preferredColorScheme(.dark)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button { dismiss() } label: { Image(systemName: "xmark").foregroundColor(.white).frame(width: 30, height: 30).clipShape(Circle()) }
+                }
+            }
         }
     }
 }
 
+// GoingOutNowView now becomes a chat view (updated)
 struct GoingOutNowView: View {
     let currentWeather: MeteoCurrentWeather?
-    @EnvironmentObject var userProfileManager: UserProfileManager
+    let userProfile: UserProfile // Passed directly from ContentView
     @State private var userInput = ""
-    @State private var userResponse = ""
-    @State private var advice = ""
-    @State private var isLoadingAdvice = false
-    @State private var showAdvice = false
+    @StateObject private var chatSession: GeminiChatSession // Manages the chat
     @Environment(\.dismiss) var dismiss
 
-    var weatherSummary: String {
-        guard let weather = currentWeather else {
-            return "Weather data is not available."
-        }
-        return "\(Int(weather.current.temperature_2m))°F, with wind speeds of \(Int(weather.current.wind_speed_10m)) mph and a \(weather.current.precipitation > 0 ? "chance" : "low chance") of rain."
+    init(currentWeather: MeteoCurrentWeather?, userProfile: UserProfile) {
+        self.currentWeather = currentWeather
+        self.userProfile = userProfile
+        // Initialize chatSession with the specific currentWeather and userProfile
+        _chatSession = StateObject(wrappedValue: GeminiChatSession(currentWeather: currentWeather, userProfile: userProfile))
     }
-   
 
     var body: some View {
         NavigationStack {
             ZStack {
                 DynamicGradientBackground(colors: [.pink, .purple, .blue]).ignoresSafeArea()
 
-                VStack(spacing: 22) {
-                    VStack(spacing: 8) {
-                        Text("Advice Page").font(.largeTitle.bold()).multilineTextAlignment(.center).foregroundStyle(.white)
+                VStack(spacing: 10) {
+                    VStack(spacing:2) {
+                        HStack{
+                            Image(systemName:"sparkles")
+                                .resizable()
+                                .frame(width: 24, height: 24)
+                                .foregroundStyle(Color.yellow)
+                            Text("Ask Delphi").font(.largeTitle.bold()).multilineTextAlignment(.center).foregroundStyle(.white)
+                        }
                         Text("What are you going to do right now?").font(.body).multilineTextAlignment(.center)
                             .foregroundStyle(.white.opacity(0.85)).padding(.horizontal)
                     }.padding(.top, 40)
-                    Spacer(minLength: 20)
-                    HStack(spacing: 10) {
-                        Image(systemName: "pencil.line").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
-                        TextField("Powered by Gemini", text: $userInput).font(.system(size: 18, weight: .medium)).foregroundStyle(.white)
-                            .textInputAutocapitalization(.sentences).disableAutocorrection(false)
-                    }
-                    .padding(.horizontal, 16).frame(height: 56).background(RoundedRectangle(cornerRadius: 16).fill(.ultraThinMaterial))
-                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(LinearGradient(colors: [.white.opacity(0.8), .white.opacity(0.2)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
-                    .shadow(color: .black.opacity(0.35), radius: 12, x: 0, y: 8).shadow(color: .white.opacity(0.12), radius: 4, x: 0, y: 1)
-                    .padding(.horizontal, 24)
-
-                    Button {
-                        Task {
-                            guard !userInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                                  let weather = currentWeather else { return }
-                            
-                            isLoadingAdvice = true; advice = ""; userResponse = userInput
-                            defer { isLoadingAdvice = false }
-                            do {
-                                let result = try await GeminiService.advise(
-                                    activity: userResponse,
-                                    weatherSummary: weatherSummary,
-                                    latitude: weather.latitude,
-                                    longitude: weather.longitude,
-                                    userProfile: userProfileManager.profile
-                                )
-                                await MainActor.run { advice = result; showAdvice = true }
-                            } catch {
-                                await MainActor.run {
-                                    advice = "Could not retrieve advice. Please try again."; showAdvice = true
+                    
+                    ScrollView {
+                        ScrollViewReader { proxy in
+                            VStack(spacing: 0) {
+                                ForEach(chatSession.messages) { message in
+                                    ChatMessageBubble(message: message)
+                                        .id(message.id)
                                 }
-                                print("Gemini error:", error)
+                                if chatSession.isLoading {
+                                    HStack {
+                                        ProgressView().tint(.purple)
+                                            .scaleEffect(0.8)
+                                            .padding(.leading, 12)
+                                            .padding(.vertical, 4)
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal)
+                                    .padding(.vertical, 4)
+                                }
+                            }
+                            .onChange(of: chatSession.messages.count) { _ in
+                                if let lastMessage = chatSession.messages.last {
+                                    withAnimation { // Animate the scroll
+                                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                                    }
+                                }
                             }
                         }
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "sparkles")
-                            Text(isLoadingAdvice ? "Getting Advice..." : "Get Advice").fontWeight(.semibold)
-                        }
-                        .frame(maxWidth: .infinity).padding(.vertical, 16).foregroundStyle(.white)
-                        .background(LinearGradient(colors: [.blue, .purple], startPoint: .leading, endPoint: .trailing))
-                        .clipShape(RoundedRectangle(cornerRadius: 14)).shadow(color: .purple.opacity(0.35), radius: 12, x: 0, y: 6)
                     }
-                    .padding(.horizontal, 24).disabled(isLoadingAdvice)
-                    Spacer()
-                    Button { dismiss() } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "xmark.circle.fill"); Text("Close").fontWeight(.semibold)
+                    .padding(.top, 10)
+                    
+                    HStack(spacing: 10) {
+                        TextField("Powered by Gemini", text: $userInput)
+                            .font(.system(size: 18, weight: .light))
+                            .foregroundStyle(.white)
+                            .textInputAutocapitalization(.sentences)
+                            .disableAutocorrection(false)
+                            .padding(.horizontal, 16)
+                            .frame(height: 56)
+                            .background(RoundedRectangle(cornerRadius: 50).fill(.ultraThinMaterial))
+                            
+                        Button {
+                            Task {
+                                let message = userInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !message.isEmpty else { return }
+                                userInput = "" // Clear input field
+                                await chatSession.sendUserMessage(activity: message)
+                            }
+                        } label: {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 32, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 56, height: 56)
+                                .background(LinearGradient(colors: [.blue, .purple], startPoint: .leading, endPoint: .trailing))
+                                .clipShape(Circle())
+                                .shadow(color: .purple.opacity(0.35), radius: 12, x: 0, y: 6)
                         }
-                        .frame(maxWidth: .infinity).padding(.vertical, 16).foregroundStyle(.white)
-                        .background(RoundedRectangle(cornerRadius: 14).fill(.ultraThinMaterial))
-                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.35), lineWidth: 1))
+                        .disabled(chatSession.isLoading || userInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
-                    .padding(.horizontal, 24).padding(.bottom, 30)
-                }
-                if isLoadingAdvice {
-                    Color.black.opacity(0.3).ignoresSafeArea()
-                    ProgressView("Analyzing your plan...").tint(.white).foregroundColor(.white).scaleEffect(1.2)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 30)
                 }
             }
-            .navigationBarHidden(true).toolbarBackground(.hidden, for: .navigationBar).background(.clear).preferredColorScheme(.dark)
-            .navigationDestination(isPresented: $showAdvice) { AdviceResultView(advice: advice) }
+            .background(.clear).preferredColorScheme(.dark)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button { dismiss() } label: { Image(systemName: "xmark").foregroundColor(.white).frame(width: 30, height: 30).clipShape(Circle()) }
+                }
+            }
         }
     }
 }
 
-struct AdviceResultView: View {
-    let advice: String
-    @Environment(\.presentationMode) private var presentationMode
+// AdviceResultView is no longer needed as advice is shown in chat
+// struct AdviceResultView: View { ... }
 
-    var body: some View {
-        ZStack {
-            LinearGradient(colors: [.indigo, .purple, .pink], startPoint: .topLeading, endPoint: .bottomTrailing)
-                .ignoresSafeArea()
-
-            VStack(spacing: 20) {
-                Text("Your Advice").font(.largeTitle.bold()).foregroundStyle(.white).padding(.top, 16)
-                ScrollView {
-                    Text(advice).font(.title3).foregroundStyle(.white).multilineTextAlignment(.leading)
-                        .lineSpacing(8).fixedSize(horizontal: false, vertical: true).padding(20)
-                        .frame(maxWidth: .infinity, alignment: .leading).background(.ultraThinMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                        .shadow(color: .black.opacity(0.25), radius: 14, x: 0, y: 8).padding(.horizontal, 20)
-                }
-                .scrollIndicators(.visible)
-                
-                Button {
-                    presentationMode.wrappedValue.dismiss()
-                } label: {
-                    Label("Done", systemImage: "checkmark.circle.fill")
-                        .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 14).foregroundStyle(.white)
-                        .background(RoundedRectangle(cornerRadius: 14).fill(.ultraThinMaterial))
-                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.35), lineWidth: 1))
-                        .padding(.horizontal, 24)
-                }
-
-                Spacer(minLength: 12)
-            }
-        }
-        .navigationBarBackButtonHidden(true)
-    }
-}
-
-// MARK: - Gemini Service
+// MARK: - Gemini Service (Updated - Advise methods removed)
 
 struct GeminiService {
-    static func advise(activity: String, weatherSummary: String, latitude: Double, longitude: Double, userProfile: UserProfile) async throws -> String {
-        let profileInfo = userProfile.promptRepresentation
-        let prompt = """
-        You are an outdoors advisor. Based on the user's plan, today's weather, their location, and their personal profile,
-        give short, helpful, actionable advice (under 100 words). Be constructive and discouraging if absolutely necessary (use time as a factor and account for safety).
-        If the user has medical conditions or allergies, tailor your advice to be safe for them. Don't use text formatting.
-
-        USER PLAN:
-        \(activity)
-
-        WEATHER:
-        \(weatherSummary)
-        
-        LOCATION:
-        Latitude: \(latitude), Longitude: \(longitude)
-        
-        \(profileInfo)
-        """
-
-        let response = try await geminiModel.generateContent(prompt)
-        let text = response.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !text.isEmpty else { throw GeminiError.emptyResponse }
-        return text
-    }
-    
+    // summarizeDay remains as it's used for the daily overview, not a chat session
     static func summarizeDay(dayData: DailyWeatherData, userProfile: UserProfile) async throws -> String {
         guard !dayData.hourlyData.isEmpty else {
             return "Not enough data to generate a summary."
@@ -1382,10 +1611,10 @@ struct GeminiService {
         let low = temps.min() ?? 0
         let totalPrecipitation = dayData.totalPrecipitation
         let dateString = dayData.date.formatted(date: .abbreviated, time: .omitted)
-        // Correctly call the property on the userProfile object
         let profileInfo = userProfile.promptRepresentation
 
         let prompt = """
+        Your name is Delphi, and you are an AI powered by google.
         You are a friendly weather concierge. Briefly summarize the weather for \(dateString).
         Mention the high of \(String(format: "%.0f", high))°F and the low of \(String(format: "%.0f", low))°F.
         The total precipitation is \(String(format: "%.2f", totalPrecipitation / 25.4)) inches.
@@ -1393,6 +1622,9 @@ struct GeminiService {
         Be creative and encouraging. Keep the entire response under 75 words. Don't use text formatting. 
         
         \(profileInfo)
+        
+        If the user isn't asking about something regarding weather, respond accordingly, but also ask the user if they need help with making plans.
+
         """
         
         let response = try await geminiModel.generateContent(prompt)
@@ -1401,34 +1633,7 @@ struct GeminiService {
         return text
     }
     
-    static func adviseForDay(activity: String, dayData: DailyWeatherData, userProfile: UserProfile) async throws -> String {
-        guard !dayData.hourlyData.isEmpty else {
-            return "Not enough data to generate advice."
-        }
-        
-        let temps = dayData.hourlyData.map { ($0.temperature * 9/5) + 32 }
-        let high = temps.max() ?? 0
-        let low = temps.min() ?? 0
-        let totalPrecipitation = dayData.totalPrecipitation
-        let dateString = dayData.date.formatted(date: .abbreviated, time: .omitted)
-        // Correctly call the property on the userProfile object
-        let profileInfo = userProfile.promptRepresentation
-
-        let prompt = """
-        You are an expert event planning assistant.
-        A user wants to '\(activity)' on \(dateString).
-        The forecast is a high of \(String(format: "%.0f", high))°F, a low of \(String(format: "%.0f", low))°F, with a total precipitation of \(String(format: "%.2f", totalPrecipitation / 25.4)) inches for the day.
-        Give short, helpful, and actionable advice for their plan, keeping their personal profile in mind for safety and relevance. Be friendly and encouraging.
-        Keep the response under 100 words Don't use text formatting.
-        
-        \(profileInfo)
-        """
-        
-        let response = try await geminiModel.generateContent(prompt)
-        let text = response.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !text.isEmpty else { throw GeminiError.emptyResponse }
-        return text
-    }
+    // The static `advise` and `adviseForDay` methods are now replaced by `GeminiChatSession`
 }
 
 

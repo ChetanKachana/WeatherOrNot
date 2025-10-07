@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		FEF340592E94C3ED000E3D37 /* ParallaxSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = FEF340582E94C3ED000E3D37 /* ParallaxSwiftUI */; };
 		FEFE657B2E93999E00A4528D /* GoogleGenerativeAI in Frameworks */ = {isa = PBXBuildFile; productRef = FEFE657A2E93999E00A4528D /* GoogleGenerativeAI */; };
 /* End PBXBuildFile section */
 
@@ -57,6 +58,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				FEFE657B2E93999E00A4528D /* GoogleGenerativeAI in Frameworks */,
+				FEF340592E94C3ED000E3D37 /* ParallaxSwiftUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -118,6 +120,7 @@
 			name = WeatherOrNot;
 			packageProductDependencies = (
 				FEFE657A2E93999E00A4528D /* GoogleGenerativeAI */,
+				FEF340582E94C3ED000E3D37 /* ParallaxSwiftUI */,
 			);
 			productName = WeatherOrNot;
 			productReference = FEFF80362E91C9640084556B /* WeatherOrNot.app */;
@@ -203,6 +206,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				FEFE65792E93999E00A4528D /* XCRemoteSwiftPackageReference "generative-ai-swift" */,
+				FEF340572E94C3ED000E3D37 /* XCRemoteSwiftPackageReference "ParallaxSwiftUI" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = FEFF80372E91C9640084556B /* Products */;
@@ -409,6 +413,7 @@
 				DEVELOPMENT_TEAM = T8J393GKX3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Delphi;
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -442,6 +447,7 @@
 				DEVELOPMENT_TEAM = T8J393GKX3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Delphi;
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -591,6 +597,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		FEF340572E94C3ED000E3D37 /* XCRemoteSwiftPackageReference "ParallaxSwiftUI" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Priva28/ParallaxSwiftUI";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.5;
+			};
+		};
 		FEFE65792E93999E00A4528D /* XCRemoteSwiftPackageReference "generative-ai-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/google/generative-ai-swift";
@@ -602,6 +616,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		FEF340582E94C3ED000E3D37 /* ParallaxSwiftUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FEF340572E94C3ED000E3D37 /* XCRemoteSwiftPackageReference "ParallaxSwiftUI" */;
+			productName = ParallaxSwiftUI;
+		};
 		FEFE657A2E93999E00A4528D /* GoogleGenerativeAI */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = FEFE65792E93999E00A4528D /* XCRemoteSwiftPackageReference "generative-ai-swift" */;
